@@ -157,7 +157,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  tabActive: { backgroundColor: colors.text, borderColor: colors.text },
+  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   tabText: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
   tabTextActive: { color: "#FFF" },
   card: {
@@ -179,7 +179,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: colors.text,
+    backgroundColor: colors.primary,
   },
   payBtnText: { color: "#FFF", fontWeight: "700", fontSize: 12 },
   paidPill: {

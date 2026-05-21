@@ -1,24 +1,41 @@
-// RX Tech – Shared theme tokens
+// RX Tech – Theme tokens (OrlaFarma-inspired palette)
+// Brand colors:
+//   Deep Orange #F08C47 (primary)
+//   Peach       #F6AC85 (primary soft / highlights)
+//   Teal        #7DC4B6 (secondary / accent)
+//   Cream       #FCF6E6 (warm surface)
 export const colors = {
+  // Surfaces
   bg: "#FFFFFF",
-  surface: "#F5F5F7",
-  surfaceAlt: "#FAFAFB",
-  border: "#E5E7EB",
-  borderStrong: "#D1D5DB",
-  text: "#0A0A0A",
-  textSecondary: "#6B7280",
-  textTertiary: "#9CA3AF",
-  primary: "#0A0A0A",
+  surface: "#FCF6E6", // warm cream surface (was light gray)
+  surfaceAlt: "#FFF8EC",
+  surfaceMuted: "#F5F5F4",
+  border: "#EDE4D3",
+  borderStrong: "#D9CDB7",
+
+  // Text
+  text: "#2A1F14", // warm near-black (was pure black)
+  textSecondary: "#7A6A55",
+  textTertiary: "#B0A28C",
+
+  // Brand
+  primary: "#F08C47", // deep orange
+  primarySoft: "#F6AC85", // peach
+  primaryBg: "#FFE9D8",
   primaryText: "#FFFFFF",
-  accent: "#0EA5A4", // teal-ish for highlights/active
+  accent: "#7DC4B6", // teal
+  accentSoft: "#B6DDD3",
+  accentBg: "#E2F3EE",
+
+  // Semantic
   success: "#16A34A",
   successBg: "#DCFCE7",
   warning: "#F59E0B",
   warningBg: "#FEF3C7",
   danger: "#DC2626",
   dangerBg: "#FEE2E2",
-  info: "#2563EB",
-  infoBg: "#DBEAFE",
+  info: "#0EA5A4",
+  infoBg: "#E2F3EE",
 };
 
 export const radius = {

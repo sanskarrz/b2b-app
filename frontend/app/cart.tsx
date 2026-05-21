@@ -246,6 +246,6 @@ const styles = StyleSheet.create({
   bbValue: { fontWeight: "800", color: colors.text, fontSize: 18 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14 },
   emptyText: { color: colors.textSecondary, fontSize: 15 },
-  emptyBtn: { backgroundColor: colors.text, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 12 },
+  emptyBtn: { backgroundColor: colors.primary, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 12 },
   emptyBtnText: { color: "#FFF", fontWeight: "700" },
 });

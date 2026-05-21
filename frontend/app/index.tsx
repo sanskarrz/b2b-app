@@ -32,7 +32,8 @@ export default function Index() {
   return (
     <View style={styles.container} testID="splash-screen">
       <View style={styles.logo}>
-        <Text style={styles.logoText}>RX</Text>
+        <Text style={styles.logoR}>R</Text>
+        <Text style={styles.logoX}>X</Text>
       </View>
       <Text style={styles.brand}>RX Tech</Text>
       <Text style={styles.tag}>B2B Pharma Marketplace</Text>
@@ -49,19 +50,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   logo: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
-    backgroundColor: colors.primary,
+    width: 88,
+    height: 88,
+    borderRadius: 24,
+    backgroundColor: colors.surface,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 20,
+    flexDirection: "row",
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
-  logoText: {
-    color: "#FFF",
-    fontSize: 30,
-    fontWeight: "800",
-    letterSpacing: -1,
+  logoR: {
+    color: colors.accent,
+    fontSize: 36,
+    fontWeight: "900",
+    letterSpacing: -1.5,
+  },
+  logoX: {
+    color: colors.primary,
+    fontSize: 36,
+    fontWeight: "900",
+    letterSpacing: -1.5,
   },
   brand: {
     fontSize: 28,

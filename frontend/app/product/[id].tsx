@@ -235,10 +235,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.text },
+  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
   distName: { fontWeight: "700", color: colors.text, fontSize: 14 },
   distMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-  bestPill: { backgroundColor: colors.text, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  bestPill: { backgroundColor: colors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   bestText: { color: "#FFF", fontWeight: "800", fontSize: 9, letterSpacing: 0.5 },
   subCard: {
     flexDirection: "row",

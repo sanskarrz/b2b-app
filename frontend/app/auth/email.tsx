@@ -51,9 +51,12 @@ export default function EmailEntry() {
       >
         <View style={styles.content}>
           <View style={styles.logoBox}>
-            <Text style={styles.logoText}>RX</Text>
+            <Text style={styles.logoR}>R</Text>
+            <Text style={styles.logoX}>X</Text>
           </View>
-          <Text style={styles.brand}>RX Tech</Text>
+          <Text style={styles.brand}>
+            <Text style={{ color: colors.accent }}>RX</Text> Tech
+          </Text>
           <Text style={styles.tag}>The B2B medicine marketplace built for pharmacies.</Text>
 
           <View style={{ height: 40 }} />
@@ -102,15 +105,19 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   content: { flex: 1, padding: 24, justifyContent: "center" },
   logoBox: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    backgroundColor: colors.primary,
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,
+    flexDirection: "row",
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
-  logoText: { color: "#FFF", fontSize: 24, fontWeight: "800" },
+  logoR: { color: colors.accent, fontSize: 30, fontWeight: "900", letterSpacing: -1.5 },
+  logoX: { color: colors.primary, fontSize: 30, fontWeight: "900", letterSpacing: -1.5 },
   brand: { fontSize: 32, fontWeight: "800", color: colors.text, letterSpacing: -1 },
   tag: { fontSize: 14, color: colors.textSecondary, marginTop: 6, lineHeight: 20 },
   label: { fontSize: 13, fontWeight: "600", color: colors.text, marginBottom: 8 },

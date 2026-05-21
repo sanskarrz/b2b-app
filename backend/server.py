@@ -33,6 +33,8 @@ JWT_EXPIRES_DAYS = 30
 OTP_TTL_MINUTES = 10
 # DEV mode: return OTP in API response (no SMTP configured)
 DEV_RETURN_OTP = os.environ.get("DEV_RETURN_OTP", "true").lower() == "true"
+# Demo account — only this email gets pre-seeded sample data
+DEMO_EMAIL = "demo@rxtech.com"
 
 # ---------- App ----------
 app = FastAPI(title="RX Tech API")
@@ -320,8 +322,9 @@ async def verify_otp(payload: VerifyOTPRequest):
 
     # Issue token
     token = create_token(user["id"])
-    # Seed sample data on first login
-    await seed_user_data(user["id"])
+    # Seed sample data ONLY for the demo account — all other users start empty (real)
+    if email == DEMO_EMAIL:
+        await seed_user_data(user["id"])
 
     return {"success": True, "token": token, "user": user, "onboarded": user.get("onboarded", False)}
 

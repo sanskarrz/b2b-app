@@ -59,7 +59,7 @@ export default function OrderDetail() {
                   {STEP_LABELS[i]}
                 </Text>
                 {i < STEPS.length - 1 && (
-                  <View style={[styles.stepLine, i < stepIdx && { backgroundColor: colors.text }]} />
+                  <View style={[styles.stepLine, i < stepIdx && { backgroundColor: colors.primary }]} />
                 )}
               </View>
             );

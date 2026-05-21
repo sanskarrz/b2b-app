@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  tabActive: { backgroundColor: colors.text, borderColor: colors.text },
+  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   tabText: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
   tabTextActive: { color: "#FFF" },
   card: {

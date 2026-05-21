@@ -183,7 +183,7 @@ export default function HomeScreen() {
             <TouchableOpacity style={styles.linkBtn}>
               <Text style={styles.linkBtnText}>Keep Backorder</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.linkBtn, { backgroundColor: colors.text }]}>
+            <TouchableOpacity style={[styles.linkBtn, { backgroundColor: colors.primary }]}>
               <Text style={[styles.linkBtnText, { color: "#FFF" }]}>Switch Distributor</Text>
             </TouchableOpacity>
           </View>
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
   suggBadge: { backgroundColor: "#FEF3C7", borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
   suggBadgeText: { fontSize: 10, color: "#92400E", fontWeight: "700" },
   aiSub: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
-  aiBtn: { backgroundColor: colors.text, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10 },
+  aiBtn: { backgroundColor: colors.primary, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10 },
   aiBtnText: { color: "#FFF", fontWeight: "700", fontSize: 12 },
   sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   sectionTitle: { fontSize: 16, fontWeight: "800", color: colors.text, letterSpacing: -0.3 },

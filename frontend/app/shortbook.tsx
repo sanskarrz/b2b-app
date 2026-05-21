@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
   meta: { color: colors.textSecondary, fontSize: 12, marginTop: 4 },
   suggest: { fontSize: 12, color: colors.text, marginTop: 3 },
   value: { fontWeight: "800", color: colors.text, fontSize: 14, marginTop: 4 },
-  addBtn: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.text, alignItems: "center", justifyContent: "center" },
+  addBtn: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   emptyText: { color: colors.textSecondary, fontSize: 15, fontWeight: "600" },
 });
