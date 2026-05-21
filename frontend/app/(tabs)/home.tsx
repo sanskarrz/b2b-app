@@ -348,37 +348,38 @@ export default function HomeScreen() {
             </View>
           </Animated.View>
 
-          {/* Profit Opportunities */}
+          {/* Smart Reorder Banner + Quick Tools (replaces old Profit Opportunities) */}
           <Animated.View entering={FadeIn.delay(300).duration(400)}>
             <View style={[styles.sectionHead, { marginTop: 22 }]}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Ionicons name="trending-up" size={16} color={colors.success} />
-                <Text style={styles.sectionTitle}>Profit Opportunities</Text>
+                <Ionicons name="sparkles" size={16} color={colors.primary} />
+                <Text style={styles.sectionTitle}>Smart Tools</Text>
               </View>
             </View>
-            {data.profit_opportunities.map((p: any, i: number) => (
-              <TouchableOpacity
-                key={i}
-                style={styles.profitCard}
-                onPress={() => router.push("/reports/profit")}
-                activeOpacity={0.8}
-              >
-                <View style={styles.profitIconBox}>
-                  <Ionicons name="cash-outline" size={16} color={colors.success} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.profitTitle}>{p.title}</Text>
-                  <Text style={styles.profitSub}>{p.subtitle}</Text>
-                </View>
-                <View style={styles.profitTag}>
-                  <Text style={styles.profitTagText}>{p.tag}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              <ToolCard icon="trending-up" label="Smart Reorder" sub="AI-predicted refills" color={colors.success} onPress={() => router.push("/reorder-predictor")} />
+              <ToolCard icon="git-compare" label="Compare" sub="Find best vendor" color={colors.accent} onPress={() => router.push("/compare")} />
+              <ToolCard icon="bar-chart" label="Margin Analyzer" sub="Profit by category" color="#7C3AED" onPress={() => router.push("/analytics/margin")} />
+              <ToolCard icon="calculator" label="Margin Calc" sub="PTR ↔ MRP" color="#0EA5A4" onPress={() => router.push("/calculator")} />
+              <ToolCard icon="bookmark" label="Templates" sub="Recurring carts" color={colors.warning} onPress={() => router.push("/templates")} />
+              <ToolCard icon="calendar" label="Cash Flow" sub="60-day calendar" color={colors.primary} onPress={() => router.push("/cash-flow")} />
+            </View>
           </Animated.View>
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function ToolCard({ icon, label, sub, color, onPress }: any) {
+  return (
+    <TouchableOpacity style={styles.toolCard} onPress={onPress} activeOpacity={0.85}>
+      <View style={[styles.toolIcon, { backgroundColor: color + "18", borderColor: color + "40" }]}>
+        <Ionicons name={icon} size={20} color={color} />
+      </View>
+      <Text style={styles.toolLabel}>{label}</Text>
+      <Text style={styles.toolSub}>{sub}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -752,4 +753,24 @@ const styles = StyleSheet.create({
   profitSub: { color: colors.textSecondary, fontSize: 11.5, marginTop: 3 },
   profitTag: { backgroundColor: colors.successBg, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
   profitTagText: { color: "#15803D", fontWeight: "800", fontSize: 11 },
+
+  // Tool cards (Smart Tools grid)
+  toolCard: {
+    flexBasis: "31%",
+    flexGrow: 1,
+    alignItems: "center",
+    padding: 12,
+    backgroundColor: "#FFF",
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 4,
+  },
+  toolIcon: {
+    width: 44, height: 44, borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center", justifyContent: "center",
+  },
+  toolLabel: { fontWeight: "800", color: colors.text, fontSize: 12, textAlign: "center", marginTop: 4 },
+  toolSub: { color: colors.textSecondary, fontSize: 10, textAlign: "center" },
 });

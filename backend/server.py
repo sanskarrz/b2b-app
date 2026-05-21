@@ -513,13 +513,56 @@ async def list_distributors(q: Optional[str] = None):
 
 
 @api_router.get("/distributors/{dist_id}")
-async def get_distributor(dist_id: str):
+async def get_distributor(dist_id: str, user: Optional[dict] = Depends(get_current_user)):
     d = await db.distributors.find_one({"id": dist_id}, {"_id": 0})
     if not d:
         raise HTTPException(404, "Not found")
-    # Products from this distributor
     prods = await db.products.find({"distributor_ids": dist_id}, {"_id": 0}).to_list(200)
-    return {"distributor": d, "products": prods}
+
+    # User-specific stats if logged in
+    stats = None
+    last_chat = None
+    recent_orders: list = []
+    if user:
+        orders = await db.orders.find({"user_id": user["id"], "distributor_id": dist_id}, {"_id": 0}).to_list(200)
+        payments = await db.payments.find({"user_id": user["id"], "distributor_id": dist_id}, {"_id": 0}).to_list(200)
+        total_spent = sum(o["total"] for o in orders)
+        order_count = len(orders)
+        unpaid = sum(p["amount"] for p in payments if p["status"] in ("due", "overdue"))
+        last_order = max(orders, key=lambda o: o["created_at"]) if orders else None
+        stats = {
+            "total_spent": round(total_spent, 2),
+            "order_count": order_count,
+            "unpaid": round(unpaid, 2),
+            "last_order_date": last_order["created_at"] if last_order else None,
+        }
+        # Recent 5 orders
+        recent_orders = sorted(orders, key=lambda o: o["created_at"], reverse=True)[:5]
+        # Last chat preview
+        last_chat = await db.chat_messages.find_one(
+            {"user_id": user["id"], "distributor_id": dist_id},
+            {"_id": 0},
+            sort=[("created_at", -1)],
+        )
+
+    # Contact details — derived (could be real fields in future)
+    contact = {
+        "phone": d.get("contact_phone") or "+91 22 6666 0000",
+        "whatsapp": d.get("contact_whatsapp") or "+91 98765 43210",
+        "email": d.get("contact_email") or f"sales@{d['short_name'].lower().replace(' ', '').replace('.', '')}.in",
+        "address": d.get("address") or f"Plot 12, MIDC, {d['location']}, MH 400 0XX",
+        "sales_rep": d.get("sales_rep") or {"name": "Rajesh Kumar", "phone": "+91 98765 43210", "designation": "Sr. Sales Executive"},
+        "working_hours": "Mon–Sat 9 AM – 7 PM",
+    }
+
+    return {
+        "distributor": d,
+        "contact": contact,
+        "products": prods,
+        "stats": stats,
+        "recent_orders": recent_orders,
+        "last_chat": last_chat,
+    }
 
 
 @api_router.get("/products")
@@ -1499,6 +1542,132 @@ async def list_recent(user: dict = Depends(get_current_user)):
         if p:
             out.append(p)
     return out
+
+
+# ============================================================
+# MARGIN ANALYZER (by category)
+# ============================================================
+@api_router.get("/analytics/margin-by-category")
+async def margin_by_category(user: dict = Depends(get_current_user)):
+    """Aggregate orders by product category to show margin contribution."""
+    orders = await db.orders.find({"user_id": user["id"], "status": {"$in": ["delivered", "shipped", "processing"]}}, {"_id": 0}).to_list(500)
+    cat_data: dict = {}
+    for o in orders:
+        for it in o.get("items", []):
+            p = await db.products.find_one({"id": it["product_id"]}, {"_id": 0})
+            if not p:
+                continue
+            cat = p.get("category", "Other")
+            margin_pct = p.get("margin_pct", 20)
+            spend = it["price"] * it["qty"]
+            profit = spend * (margin_pct / 100)
+            entry = cat_data.setdefault(cat, {"spend": 0, "profit": 0, "items": 0})
+            entry["spend"] += spend
+            entry["profit"] += profit
+            entry["items"] += it["qty"]
+    rows = [
+        {
+            "category": k,
+            "spend": round(v["spend"], 2),
+            "profit": round(v["profit"], 2),
+            "margin_pct": round((v["profit"] / v["spend"]) * 100, 1) if v["spend"] > 0 else 0,
+            "items": v["items"],
+        }
+        for k, v in cat_data.items()
+    ]
+    rows.sort(key=lambda r: r["profit"], reverse=True)
+    return {
+        "rows": rows,
+        "total_spend": round(sum(r["spend"] for r in rows), 2),
+        "total_profit": round(sum(r["profit"] for r in rows), 2),
+    }
+
+
+# ============================================================
+# SMART REORDER PREDICTOR
+# ============================================================
+@api_router.get("/analytics/reorder-predictor")
+async def reorder_predictor(user: dict = Depends(get_current_user)):
+    """Predict which SKUs need reordering based on order history.
+
+    For each SKU ordered in the last 90 days, compute monthly avg → suggest
+    quantity if days_since_last >= avg_cycle.
+    """
+    orders = await db.orders.find(
+        {"user_id": user["id"], "status": {"$in": ["delivered", "shipped"]}},
+        {"_id": 0},
+    ).to_list(500)
+    sku_data: dict = {}
+    for o in orders:
+        try:
+            d = datetime.fromisoformat(o["created_at"].replace("Z", "+00:00"))
+        except Exception:
+            continue
+        for it in o.get("items", []):
+            pid = it["product_id"]
+            entry = sku_data.setdefault(pid, {"qty": 0, "occurrences": [], "name": it["name"]})
+            entry["qty"] += it["qty"]
+            entry["occurrences"].append(d)
+
+    now = now_utc()
+    suggestions = []
+    for pid, info in sku_data.items():
+        info["occurrences"].sort()
+        if len(info["occurrences"]) < 1:
+            continue
+        last_order = info["occurrences"][-1]
+        days_since = (now - last_order).days
+        # estimated cycle = total days span / orders. fallback 30
+        if len(info["occurrences"]) >= 2:
+            span = (info["occurrences"][-1] - info["occurrences"][0]).days
+            cycle = max(7, span / max(len(info["occurrences"]) - 1, 1))
+        else:
+            cycle = 30
+        urgency = days_since / cycle
+        if urgency >= 0.7:
+            p = await db.products.find_one({"id": pid}, {"_id": 0})
+            if not p:
+                continue
+            avg_qty = round(info["qty"] / len(info["occurrences"]))
+            suggestions.append({
+                "product_id": pid,
+                "product": p,
+                "avg_qty": avg_qty,
+                "days_since": days_since,
+                "cycle_days": round(cycle),
+                "urgency": round(urgency, 2),
+                "suggested_qty": avg_qty,
+            })
+    suggestions.sort(key=lambda s: s["urgency"], reverse=True)
+    return suggestions[:20]
+
+
+# ============================================================
+# DISTRIBUTOR COMPARE (A vs B)
+# ============================================================
+@api_router.get("/distributors/compare/{a_id}/{b_id}")
+async def compare_distributors(a_id: str, b_id: str, user: dict = Depends(get_current_user)):
+    a = await db.distributors.find_one({"id": a_id}, {"_id": 0})
+    b = await db.distributors.find_one({"id": b_id}, {"_id": 0})
+    if not a or not b:
+        raise HTTPException(404, "Distributor not found")
+
+    async def stats_for(did: str):
+        orders = await db.orders.find({"user_id": user["id"], "distributor_id": did}, {"_id": 0}).to_list(200)
+        payments = await db.payments.find({"user_id": user["id"], "distributor_id": did}, {"_id": 0}).to_list(200)
+        return {
+            "total_spent": round(sum(o["total"] for o in orders), 2),
+            "order_count": len(orders),
+            "unpaid": round(sum(p["amount"] for p in payments if p["status"] in ("due", "overdue")), 2),
+        }
+
+    a_prods = await db.products.count_documents({"distributor_ids": a_id})
+    b_prods = await db.products.count_documents({"distributor_ids": b_id})
+
+    return {
+        "a": {**a, "product_count": a_prods, "user_stats": await stats_for(a_id)},
+        "b": {**b, "product_count": b_prods, "user_stats": await stats_for(b_id)},
+    }
 
 
 @api_router.get("/")

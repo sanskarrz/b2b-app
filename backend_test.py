@@ -403,6 +403,135 @@ def test_distributor_portal(s):
            f"missing={missing} data={j}")
 
 
+def test_distributor_detail(s):
+    """GET /distributors/dist-1 should include rich fields when authenticated."""
+    r = s.get(f"{BASE}/distributors/dist-1")
+    if r.status_code != 200:
+        record("GET /distributors/dist-1 (rich)", False, f"status={r.status_code} body={r.text[:200]}")
+        return
+    j = r.json()
+    top_keys = ["distributor", "contact", "products", "stats", "recent_orders", "last_chat"]
+    missing_top = [k for k in top_keys if k not in j]
+    if missing_top:
+        record("GET /distributors/dist-1 (rich)", False, f"missing top keys: {missing_top}")
+        return
+    contact = j.get("contact") or {}
+    contact_keys = ["phone", "whatsapp", "email", "address", "sales_rep", "working_hours"]
+    missing_contact = [k for k in contact_keys if k not in contact]
+    if missing_contact:
+        record("GET /distributors/dist-1 (rich)", False, f"contact missing: {missing_contact}")
+        return
+    sr = contact.get("sales_rep") or {}
+    sr_keys = ["name", "phone", "designation"]
+    missing_sr = [k for k in sr_keys if k not in sr]
+    if missing_sr:
+        record("GET /distributors/dist-1 (rich)", False, f"sales_rep missing: {missing_sr}")
+        return
+    stats = j.get("stats")
+    if not isinstance(stats, dict):
+        record("GET /distributors/dist-1 (rich)", False, f"stats is not dict: {stats}")
+        return
+    stats_keys = ["total_spent", "order_count", "unpaid", "last_order_date"]
+    missing_stats = [k for k in stats_keys if k not in stats]
+    if missing_stats:
+        record("GET /distributors/dist-1 (rich)", False, f"stats missing: {missing_stats}")
+        return
+    if not isinstance(j["recent_orders"], list):
+        record("GET /distributors/dist-1 (rich)", False, "recent_orders not list")
+        return
+    if len(j["recent_orders"]) > 5:
+        record("GET /distributors/dist-1 (rich)", False,
+               f"recent_orders > 5 ({len(j['recent_orders'])})")
+        return
+    # last_chat may be dict or null
+    if j["last_chat"] is not None and not isinstance(j["last_chat"], dict):
+        record("GET /distributors/dist-1 (rich)", False, "last_chat not dict/null")
+        return
+    record(
+        "GET /distributors/dist-1 (rich)", True,
+        f"products={len(j['products'])} recent_orders={len(j['recent_orders'])} "
+        f"total_spent={stats['total_spent']} order_count={stats['order_count']} "
+        f"unpaid={stats['unpaid']} last_chat={'yes' if j['last_chat'] else 'no'}"
+    )
+
+
+def test_distributor_compare(s):
+    r = s.get(f"{BASE}/distributors/compare/dist-1/dist-2")
+    if r.status_code != 200:
+        record("GET /distributors/compare/dist-1/dist-2", False,
+               f"status={r.status_code} body={r.text[:200]}")
+        return
+    j = r.json()
+    if "a" not in j or "b" not in j:
+        record("GET /distributors/compare/dist-1/dist-2", False, f"missing a/b keys: keys={list(j.keys())}")
+        return
+    for side in ("a", "b"):
+        block = j[side] or {}
+        if "product_count" not in block:
+            record("GET /distributors/compare/dist-1/dist-2", False, f"{side}: product_count missing")
+            return
+        if "user_stats" not in block or not isinstance(block["user_stats"], dict):
+            record("GET /distributors/compare/dist-1/dist-2", False, f"{side}: user_stats missing/invalid")
+            return
+        us = block["user_stats"]
+        for k in ("total_spent", "order_count", "unpaid"):
+            if k not in us:
+                record("GET /distributors/compare/dist-1/dist-2", False,
+                       f"{side}.user_stats missing key '{k}'")
+                return
+    record("GET /distributors/compare/dist-1/dist-2", True,
+           f"a.products={j['a']['product_count']} b.products={j['b']['product_count']} "
+           f"a.spent={j['a']['user_stats']['total_spent']} b.spent={j['b']['user_stats']['total_spent']}")
+
+
+def test_margin_by_category(s):
+    r = s.get(f"{BASE}/analytics/margin-by-category")
+    if r.status_code != 200:
+        record("GET /analytics/margin-by-category", False,
+               f"status={r.status_code} body={r.text[:200]}")
+        return
+    j = r.json()
+    for k in ("rows", "total_spend", "total_profit"):
+        if k not in j:
+            record("GET /analytics/margin-by-category", False, f"missing key {k}")
+            return
+    if not isinstance(j["rows"], list):
+        record("GET /analytics/margin-by-category", False, "rows is not list")
+        return
+    row_keys = ["category", "spend", "profit", "margin_pct", "items"]
+    for idx, row in enumerate(j["rows"]):
+        missing = [k for k in row_keys if k not in row]
+        if missing:
+            record("GET /analytics/margin-by-category", False,
+                   f"row[{idx}] missing {missing}")
+            return
+    record("GET /analytics/margin-by-category", True,
+           f"rows={len(j['rows'])} total_spend={j['total_spend']} total_profit={j['total_profit']}")
+
+
+def test_reorder_predictor(s):
+    r = s.get(f"{BASE}/analytics/reorder-predictor")
+    if r.status_code != 200:
+        record("GET /analytics/reorder-predictor", False,
+               f"status={r.status_code} body={r.text[:200]}")
+        return
+    j = r.json()
+    if not isinstance(j, list):
+        record("GET /analytics/reorder-predictor", False, f"expected list, got {type(j).__name__}")
+        return
+    keys = ["product_id", "product", "avg_qty", "days_since", "cycle_days", "urgency", "suggested_qty"]
+    for idx, sug in enumerate(j):
+        missing = [k for k in keys if k not in sug]
+        if missing:
+            record("GET /analytics/reorder-predictor", False, f"item[{idx}] missing {missing}")
+            return
+        if not isinstance(sug["product"], dict):
+            record("GET /analytics/reorder-predictor", False, f"item[{idx}].product not object")
+            return
+    record("GET /analytics/reorder-predictor", True,
+           f"suggestions={len(j)}" + (f" top_urgency={j[0]['urgency']}" if j else " (empty list is valid)"))
+
+
 def total_count():
     return len(results)
 
@@ -436,6 +565,11 @@ def main():
     test_chat(s)
     test_search_comprehensive(s)
     test_distributor_portal(s)
+    # NEW endpoints (current focus)
+    test_distributor_detail(s)
+    test_distributor_compare(s)
+    test_margin_by_category(s)
+    test_reorder_predictor(s)
     print_summary()
 
 

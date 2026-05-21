@@ -371,3 +371,11 @@ agent_communication:
       - GET /search/comprehensive?q=paracetamol returns 14 matches, each with offers[] containing per-distributor prices (first match has 5 offers). Larger catalog confirmed.
       - GET /distributor-portal/dashboard returns {received_orders, revenue, pending_payment, active_buyers}.
       No 4xx/5xx encountered. All new endpoints are working as specified.
+  - agent: "testing"
+    message: |
+      Re-ran /app/backend_test.py (now 35 tests) against the public preview URL. **35/35 PASSED. No 4xx/5xx. No missing keys.** Newly added tests for this session:
+      1. GET /api/distributors/dist-1 (rich) — returns {distributor, contact, products, stats, recent_orders, last_chat}. contact has phone/whatsapp/email/address/working_hours and a sales_rep object with name/phone/designation. stats has total_spent/order_count/unpaid/last_order_date. recent_orders is an array (1 item, ≤5). last_chat is a dict (demo seeded). products=196. ✅
+      2. GET /api/distributors/compare/dist-1/dist-2 — returns {a, b} each containing product_count and user_stats {total_spent, order_count, unpaid}. a.products=196, b.products=260. ✅
+      3. GET /api/analytics/margin-by-category — returns {rows: [{category, spend, profit, margin_pct, items}], total_spend, total_profit}. 1 row aggregated, total_spend=8751.0, total_profit=2967.79. ✅
+      4. GET /api/analytics/reorder-predictor — returns a list (currently empty for demo because no eligible SKUs have crossed the urgency threshold; this is by design and explicitly noted as acceptable in the request). ✅
+      Existing regression endpoints all still pass: /dashboard, /payments/summary, /ledger/dist-1, /cart (GET+POST /cart/items), /chat/threads. No backend errors in supervisor logs.

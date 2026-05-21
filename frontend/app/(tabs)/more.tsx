@@ -62,6 +62,15 @@ export default function More() {
       ],
     },
     {
+      title: "Smart Tools",
+      items: [
+        { icon: "calculator-outline", label: "Margin Calculator (PTR ↔ MRP)", onPress: () => router.push("/calculator"), testID: "more-calc" },
+        { icon: "git-compare-outline", label: "Compare Distributors", onPress: () => router.push("/compare"), testID: "more-compare" },
+        { icon: "bar-chart-outline", label: "Margin Analyzer by Category", onPress: () => router.push("/analytics/margin"), testID: "more-margin" },
+        { icon: "trending-up-outline", label: "Smart Reorder Predictor", onPress: () => router.push("/reorder-predictor"), testID: "more-reorder" },
+      ],
+    },
+    {
       title: "Reports & Insights",
       items: [
         { icon: "stats-chart-outline", label: "Sales Analytics", onPress: () => router.push("/reports/analytics"), testID: "more-analytics" },
