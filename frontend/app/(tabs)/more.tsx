@@ -56,20 +56,20 @@ export default function More() {
       ],
     },
     {
-      title: "Reports",
+      title: "Reports & Insights",
       items: [
-        { icon: "stats-chart-outline", label: "Sales Analytics", onPress: () => Alert.alert("Coming soon") },
-        { icon: "document-text-outline", label: "GST Invoices", onPress: () => Alert.alert("Coming soon") },
-        { icon: "trending-up-outline", label: "Profit Report", onPress: () => Alert.alert("Coming soon") },
+        { icon: "stats-chart-outline", label: "Sales Analytics", onPress: () => router.push("/reports/analytics"), testID: "more-analytics" },
+        { icon: "document-text-outline", label: "GST Invoices", onPress: () => router.push("/reports/gst-invoices"), testID: "more-gst" },
+        { icon: "trending-up-outline", label: "Profit Report", onPress: () => router.push("/reports/profit"), testID: "more-profit" },
       ],
     },
     {
       title: "Account",
       items: [
-        { icon: "person-outline", label: "Profile & Shop Info", onPress: () => Alert.alert("Coming soon") },
+        { icon: "person-outline", label: "Profile & Shop Info", onPress: () => router.push("/profile"), testID: "more-profile" },
         { icon: "flag-outline", label: "Report a problem", onPress: () => router.push("/report-issue"), testID: "more-report" },
-        { icon: "notifications-outline", label: "Notifications", onPress: () => Alert.alert("Coming soon") },
-        { icon: "help-circle-outline", label: "Help & Support", onPress: () => Alert.alert("Coming soon") },
+        { icon: "notifications-outline", label: "Notifications", onPress: () => router.push("/notifications"), testID: "more-notifications" },
+        { icon: "help-circle-outline", label: "Help & Support", onPress: () => router.push("/help"), testID: "more-help" },
       ],
     },
   ];

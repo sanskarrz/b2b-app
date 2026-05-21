@@ -9,7 +9,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -57,6 +59,33 @@ export default function Search() {
 
   const activeDistName = distFilter ? distributors.find((d) => d.id === distFilter)?.short_name : null;
 
+  const runScan = async (mode: "camera" | "library") => {
+    try {
+      if (mode === "camera") {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert("Permission needed", "Allow camera to scan prescriptions");
+          return;
+        }
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert("Permission needed", "Allow photo access to upload bills");
+          return;
+        }
+      }
+      const result =
+        mode === "camera"
+          ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.6, allowsEditing: true })
+          : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.6, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+      const b64 = result.assets[0].base64;
+      router.push({ pathname: "/scan-result", params: { image: b64 } });
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Could not capture image");
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
@@ -81,6 +110,22 @@ export default function Search() {
               </TouchableOpacity>
             )}
           </View>
+        </View>
+
+        {/* Scan & Upload actions */}
+        <View style={styles.scanRow}>
+          <TouchableOpacity style={styles.scanBtn} onPress={() => runScan("camera")} testID="scan-btn">
+            <View style={styles.scanIcon}>
+              <Ionicons name="scan-outline" size={20} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.scanTitle}>Scan Prescription / Bill</Text>
+              <Text style={styles.scanSub}>AI extracts medicines & finds best vendors</Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.uploadBtn} onPress={() => runScan("library")} testID="upload-btn">
+            <Ionicons name="cloud-upload-outline" size={22} color={colors.text} />
+          </TouchableOpacity>
         </View>
 
         {/* Distributor filter row */}
@@ -217,6 +262,47 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   input: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 0 },
+  scanRow: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  scanBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+  },
+  scanIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.bg,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  scanTitle: { color: colors.text, fontWeight: "800", fontSize: 13 },
+  scanSub: { color: colors.textSecondary, fontSize: 10, marginTop: 2 },
+  uploadBtn: {
+    width: 56,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surface,
+  },
   distFilterRow: {
     flexDirection: "row",
     alignItems: "center",

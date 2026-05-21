@@ -22,6 +22,13 @@ export default function RootLayout() {
         <Stack.Screen name="bulk-order" options={{ animation: "slide_from_right" }} />
         <Stack.Screen name="invoice/[id]" options={{ animation: "slide_from_right" }} />
         <Stack.Screen name="report-issue" options={{ animation: "slide_from_bottom", presentation: "modal" }} />
+        <Stack.Screen name="scan-result" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="profile" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="notifications" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="help" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="reports/analytics" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="reports/gst-invoices" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="reports/profit" options={{ animation: "slide_from_right" }} />
       </Stack>
     </SafeAreaProvider>
   );

@@ -741,6 +741,235 @@ async def order_shortbook_item(sid: str, user: dict = Depends(get_current_user))
 
 
 # ============================================================
+# OCR — Scan/Upload Bill/Prescription
+# ============================================================
+from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+
+EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+
+
+class ScanReq(BaseModel):
+    image_base64: str  # data URI or raw base64
+
+
+@api_router.post("/scan/extract")
+async def scan_extract(req: ScanReq, user: dict = Depends(get_current_user)):
+    """Extract medicines from a bill/prescription image, then search catalog for matches."""
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(500, "OCR not configured")
+
+    # Strip data: prefix
+    img = req.image_base64
+    if "," in img and img.startswith("data:"):
+        img = img.split(",", 1)[1]
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"scan-{user['id']}-{int(now_utc().timestamp())}",
+        system_message=(
+            "You are a pharmacy OCR assistant. Look at the image of a doctor's prescription "
+            "OR a pharmacy bill/invoice. Extract ONLY medicine names (generic or brand). "
+            "Respond with a JSON array of strings, no prose. Example: [\"Azithromycin 500mg\", \"Paracetamol 650mg\"]. "
+            "If you cannot read any medicine names, return []."
+        ),
+    ).with_model("openai", "gpt-4o-mini")
+
+    msg = UserMessage(
+        text="Extract all medicine names from this image. Return strict JSON array.",
+        file_contents=[ImageContent(image_base64=img)],
+    )
+    try:
+        raw = await chat.send_message(msg)
+    except Exception as e:
+        logger.exception("OCR failed")
+        raise HTTPException(500, f"OCR failed: {e}")
+
+    # Parse JSON array from response
+    import re, json as _json
+    text = (raw or "").strip()
+    # extract JSON array
+    m = re.search(r"\[.*\]", text, re.S)
+    names: List[str] = []
+    if m:
+        try:
+            arr = _json.loads(m.group(0))
+            names = [str(x).strip() for x in arr if str(x).strip()]
+        except Exception:
+            names = []
+
+    # Search catalog for each
+    matches = []
+    seen = set()
+    for n in names[:20]:
+        key = n.split()[0].lower() if n else ""
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        # search products by first significant token
+        items = await db.products.find(
+            {"$or": [
+                {"name": {"$regex": key, "$options": "i"}},
+                {"salt": {"$regex": key, "$options": "i"}},
+            ]},
+            {"_id": 0},
+        ).to_list(3)
+        if items:
+            # pick best (first) match — enrich with best distributor
+            best = items[0]
+            dist = await db.distributors.find_one({"id": best["best_distributor_id"]}, {"_id": 0})
+            matches.append({
+                "scanned_name": n,
+                "product": best,
+                "best_distributor": dist,
+                "alternatives": items[1:3],
+            })
+        else:
+            matches.append({"scanned_name": n, "product": None, "best_distributor": None, "alternatives": []})
+
+    return {"extracted": names, "matches": matches}
+
+
+# ============================================================
+# REPORTS / ANALYTICS
+# ============================================================
+@api_router.get("/reports/analytics")
+async def report_analytics(user: dict = Depends(get_current_user)):
+    """Sales analytics: total spend, orders, by-distributor, by-month."""
+    orders = await db.orders.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    total_spend = sum(o["total"] for o in orders)
+    total_orders = len(orders)
+    avg_order = total_spend / total_orders if total_orders else 0
+    delivered = sum(1 for o in orders if o["status"] == "delivered")
+
+    # by distributor
+    by_dist: dict = {}
+    for o in orders:
+        d = by_dist.setdefault(o["distributor_name"], {"name": o["distributor_name"], "orders": 0, "spend": 0.0})
+        d["orders"] += 1
+        d["spend"] += o["total"]
+    top_distributors = sorted(by_dist.values(), key=lambda x: x["spend"], reverse=True)[:5]
+
+    # by month (last 6)
+    from collections import defaultdict
+    months: dict = defaultdict(lambda: {"month": "", "spend": 0.0, "orders": 0})
+    for o in orders:
+        try:
+            dt = datetime.fromisoformat(o["created_at"])
+            key = dt.strftime("%Y-%m")
+            months[key]["month"] = dt.strftime("%b %y")
+            months[key]["spend"] += o["total"]
+            months[key]["orders"] += 1
+        except Exception:
+            pass
+    monthly = sorted(months.items())[-6:]
+    by_month = [v for _, v in monthly]
+
+    return {
+        "summary": {
+            "total_spend": total_spend,
+            "total_orders": total_orders,
+            "avg_order_value": avg_order,
+            "delivered_count": delivered,
+        },
+        "top_distributors": top_distributors,
+        "by_month": by_month,
+    }
+
+
+@api_router.get("/reports/gst-invoices")
+async def report_gst(user: dict = Depends(get_current_user)):
+    """List of GST-eligible invoices: all orders/payments grouped for tax purposes."""
+    payments = await db.payments.find({"user_id": user["id"]}, {"_id": 0}).to_list(500)
+    items = []
+    total_taxable = 0.0
+    for p in payments:
+        # Assume 12% GST included in invoice (typical pharma rate)
+        gst_rate = 0.12
+        taxable = round(p["amount"] / (1 + gst_rate), 2)
+        tax = round(p["amount"] - taxable, 2)
+        total_taxable += taxable
+        items.append({
+            "invoice_code": p["invoice_code"],
+            "distributor": p["distributor_name"],
+            "date": p.get("paid_at") or p["due_date"],
+            "taxable": taxable,
+            "gst": tax,
+            "total": p["amount"],
+            "status": p["status"],
+            "id": p["id"],
+        })
+    items.sort(key=lambda x: x["date"], reverse=True)
+    return {
+        "items": items,
+        "total_taxable": total_taxable,
+        "total_gst": sum(i["gst"] for i in items),
+        "total_invoice": sum(i["total"] for i in items),
+    }
+
+
+@api_router.get("/reports/profit")
+async def report_profit(user: dict = Depends(get_current_user)):
+    """Profit report: estimated margin earned per SKU based on orders placed."""
+    orders = await db.orders.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    per_sku: dict = {}
+    total_value = 0.0
+    total_margin = 0.0
+    for o in orders:
+        for line in o.get("items", []):
+            pid = line.get("product_id")
+            if not pid:
+                continue
+            prod = await db.products.find_one({"id": pid}, {"_id": 0})
+            if not prod:
+                continue
+            margin_pct = prod.get("margin_pct", 0) / 100.0
+            line_value = line["qty"] * line["price"]
+            line_margin = line_value * margin_pct
+            total_value += line_value
+            total_margin += line_margin
+            row = per_sku.setdefault(pid, {
+                "product_id": pid,
+                "name": prod["name"],
+                "qty": 0,
+                "value": 0.0,
+                "margin": 0.0,
+                "margin_pct": prod.get("margin_pct", 0),
+            })
+            row["qty"] += line["qty"]
+            row["value"] += line_value
+            row["margin"] += line_margin
+    top_sku = sorted(per_sku.values(), key=lambda x: x["margin"], reverse=True)[:8]
+    return {
+        "summary": {
+            "total_value": total_value,
+            "total_margin": total_margin,
+            "avg_margin_pct": (total_margin / total_value * 100) if total_value else 0,
+        },
+        "top_sku": top_sku,
+    }
+
+
+# ============================================================
+# PROFILE
+# ============================================================
+class ProfileUpdateReq(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    shop_name: Optional[str] = None
+    gst: Optional[str] = None
+    address: Optional[str] = None
+
+
+@api_router.patch("/auth/profile")
+async def update_profile(req: ProfileUpdateReq, user: dict = Depends(get_current_user)):
+    update = {k: v.strip() for k, v in req.model_dump(exclude_none=True).items() if isinstance(v, str)}
+    if update:
+        await db.users.update_one({"id": user["id"]}, {"$set": update})
+    updated = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    return updated
+
+
+# ============================================================
 # HEALTH / ROOT
 # ============================================================
 @api_router.get("/")
