@@ -52,6 +52,10 @@ export default function More() {
       title: "Operations",
       items: [
         { icon: "chatbubbles-outline", label: "Messages (Distributor Chat)", onPress: () => router.push("/chat"), testID: "more-chat" },
+        { icon: "calendar-outline", label: "Cash Flow Calendar", onPress: () => router.push("/cash-flow"), testID: "more-cashflow" },
+        { icon: "bookmark-outline", label: "Order Templates", onPress: () => router.push("/templates"), testID: "more-templates" },
+        { icon: "heart-outline", label: "Favourites & Watchlist", onPress: () => router.push("/favourites"), testID: "more-favs" },
+        { icon: "document-text-outline", label: "Credit / Debit Notes", onPress: () => router.push("/credit-note/new"), testID: "more-cn" },
         { icon: "list-outline", label: "Shortbook (Auto-reorder)", onPress: () => router.push("/shortbook"), testID: "more-shortbook" },
         { icon: "return-up-back-outline", label: "Returns & Refunds", onPress: () => router.push("/returns"), testID: "more-returns" },
         { icon: "cube-outline", label: "Bulk Order", onPress: () => router.push("/bulk-order"), testID: "more-bulk" },

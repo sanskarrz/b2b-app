@@ -1,7 +1,7 @@
 // 1-on-1 chat thread with a distributor (attach-order capability)
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator,
-  KeyboardAvoidingView, Platform, Modal, ScrollView,
+  KeyboardAvoidingView, Platform, Modal, ScrollView, Linking,
 } from "react-native";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -93,7 +93,8 @@ export default function ChatThread() {
         showBack
         rightIcons={[
           { name: "receipt-outline", onPress: () => router.push(`/ledger/${id}`), testID: "chat-ledger" },
-          { name: "call-outline", onPress: () => {}, testID: "chat-call" },
+          { name: "call-outline", onPress: () => Linking.openURL("tel:+912266660000"), testID: "chat-call" },
+          { name: "logo-whatsapp", onPress: () => Linking.openURL(`https://wa.me/919876543210?text=Hi%20${encodeURIComponent(dist.short_name)}`), testID: "chat-whatsapp" },
         ]}
       />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={80}>

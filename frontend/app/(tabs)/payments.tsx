@@ -28,20 +28,23 @@ export default function Payments() {
   const router = useRouter();
   const [tab, setTab] = useState("all");
   const [items, setItems] = useState<any[]>([]);
-  const [summary, setSummary] = useState({ total_due: 0, total_overdue: 0 });
+  const [summary, setSummary] = useState<any>({ total_due: 0, total_overdue: 0 });
+  const [accSummary, setAccSummary] = useState<any>(null);
   const [distributors, setDistributors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [data, dists] = await Promise.all([
+      const [data, dists, acc] = await Promise.all([
         api(`/payments${tab !== "all" ? `?status=${tab}` : ""}`),
         api(`/distributors`),
+        api("/payments/summary"),
       ]);
       setItems(data.items);
       setSummary({ total_due: data.total_due, total_overdue: data.total_overdue });
       setDistributors(dists);
+      setAccSummary(acc);
     } finally {
       setLoading(false);
     }
@@ -80,6 +83,40 @@ export default function Payments() {
           <Text style={[styles.sumValue, { color: colors.danger }]}>{formatINRFull(summary.total_overdue)}</Text>
         </View>
       </View>
+
+      {/* Accounting Summary */}
+      {accSummary && (
+        <View style={styles.accGrid}>
+          <TouchableOpacity style={styles.accTile} onPress={() => router.push("/cash-flow")} testID="acc-cashflow">
+            <View style={[styles.accIcon, { backgroundColor: colors.primaryBg }]}>
+              <Ionicons name="calendar" size={14} color={colors.primary} />
+            </View>
+            <Text style={styles.accLabel}>This Week</Text>
+            <Text style={styles.accVal}>{formatINRFull(accSummary.due_this_week)}</Text>
+          </TouchableOpacity>
+          <View style={styles.accTile}>
+            <View style={[styles.accIcon, { backgroundColor: "#FEF3C7" }]}>
+              <Ionicons name="trending-up" size={14} color={colors.warning} />
+            </View>
+            <Text style={styles.accLabel}>Credit Taken</Text>
+            <Text style={styles.accVal}>{formatINRFull(accSummary.total_credit_taken)}</Text>
+          </View>
+          <View style={styles.accTile}>
+            <View style={[styles.accIcon, { backgroundColor: colors.successBg }]}>
+              <Ionicons name="checkmark-done" size={14} color={colors.success} />
+            </View>
+            <Text style={styles.accLabel}>Paid 30d</Text>
+            <Text style={styles.accVal}>{formatINRFull(accSummary.paid_last_30d)}</Text>
+          </View>
+          <TouchableOpacity style={styles.accTile} onPress={() => router.push("/returns")}>
+            <View style={[styles.accIcon, { backgroundColor: colors.warningBg }]}>
+              <Ionicons name="lock-closed" size={14} color={colors.warning} />
+            </View>
+            <Text style={styles.accLabel}>On Hold</Text>
+            <Text style={styles.accVal}>{formatINRFull(accSummary.on_hold_disputes)}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Vendor Ledger carousel */}
       <View style={{ marginTop: 18 }}>
@@ -283,4 +320,28 @@ const styles = StyleSheet.create({
   ledgerTrack: { height: 6, backgroundColor: colors.surface, borderRadius: 999, overflow: "hidden" },
   ledgerFill: { height: "100%", borderRadius: 999 },
   ledgerFootText: { fontSize: 10, color: colors.textSecondary, fontWeight: "600" },
+
+  // Accounting tiles
+  accGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 12,
+    marginTop: 14,
+    gap: 8,
+  },
+  accTile: {
+    flexBasis: "47%",
+    flexGrow: 1,
+    padding: 10,
+    backgroundColor: "#FFF",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  accIcon: {
+    width: 24, height: 24, borderRadius: 8,
+    alignItems: "center", justifyContent: "center",
+  },
+  accLabel: { fontSize: 10, color: colors.textSecondary, fontWeight: "700", marginTop: 6 },
+  accVal: { fontSize: 15, fontWeight: "800", color: colors.text, marginTop: 2 },
 });

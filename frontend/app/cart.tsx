@@ -29,16 +29,60 @@ export default function Cart() {
   });
   const [loading, setLoading] = useState(true);
   const [placing, setPlacing] = useState<string | null>(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [substitutes, setSubstitutes] = useState<any[]>([]);
   // Per-distributor payment method choice (default cash)
   const [methods, setMethods] = useState<Record<string, PaymentMethod>>({});
 
   const load = async () => {
     setLoading(true);
     try {
-      const data = await api("/cart");
+      const [data, subs] = await Promise.all([
+        api("/cart"),
+        api("/cart/substitutes").catch(() => []),
+      ]);
       setCart(data);
+      setSubstitutes(subs);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const optimize = async () => {
+    setOptimizing(true);
+    try {
+      const res: any = await api("/cart/optimize", { method: "POST" });
+      if (res.moved === 0) {
+        confirm("Already optimal", "Your cart is already on the lowest-PTR distributors.", [{ text: "OK" }]);
+      } else {
+        confirm(
+          "Cart optimized!",
+          `Switched ${res.moved} item(s). You save ${formatINRFull(res.savings)}.`,
+          [{ text: "Awesome", onPress: load }]
+        );
+      }
+      load();
+    } catch (e: any) {
+      confirm("Error", e.message, [{ text: "OK" }]);
+    } finally {
+      setOptimizing(false);
+    }
+  };
+
+  const saveAsTemplate = () => {
+    if (cart.items.length === 0) return;
+    router.push("/templates");
+  };
+
+  const swapSubstitute = async (sub: any) => {
+    try {
+      await api(`/cart/items/${sub.cart_item_id}/swap`, {
+        method: "POST",
+        body: { product_id: sub.suggested.product_id, distributor_id: sub.suggested.distributor_id },
+      });
+      load();
+    } catch (e: any) {
+      confirm("Error", e.message, [{ text: "OK" }]);
     }
   };
 
@@ -130,6 +174,64 @@ export default function Cart() {
     <SafeAreaView style={styles.container} edges={["top"]}>
       <TopBar title="Cart" subtitle={`${cart.count} items • ${Object.keys(byDist).length} distributors`} showBack />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 160 }} showsVerticalScrollIndicator={false}>
+        {/* Optimizer + Save Template actions */}
+        <View style={styles.actionsRow}>
+          <TouchableOpacity
+            style={[styles.actionBtn, optimizing && { opacity: 0.6 }]}
+            onPress={optimize}
+            disabled={optimizing}
+            testID="cart-optimize"
+          >
+            <LinearGradient
+              colors={[colors.success, "#15803D"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.actionBtnInner}
+            >
+              {optimizing ? (
+                <ActivityIndicator color="#FFF" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="flash" size={14} color="#FFF" />
+                  <Text style={styles.actionBtnText}>Optimize (Save ₹)</Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionBtnSecondary}
+            onPress={saveAsTemplate}
+            testID="cart-save-tpl"
+          >
+            <Ionicons name="bookmark-outline" size={14} color={colors.primary} />
+            <Text style={styles.actionBtnSecondaryText}>Templates</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Substitute suggestions */}
+        {substitutes.length > 0 && (
+          <View style={styles.subsCard}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Ionicons name="bulb" size={14} color={colors.warning} />
+              <Text style={styles.subsTitle}>Smart Savings ({substitutes.length})</Text>
+            </View>
+            <Text style={styles.subsSub}>Same salt, cheaper brand available:</Text>
+            {substitutes.slice(0, 3).map((sub, i) => (
+              <View key={i} style={styles.subRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.subOld} numberOfLines={1}>
+                    {sub.current_product.name} → <Text style={styles.subNew}>{sub.suggested.product_name}</Text>
+                  </Text>
+                  <Text style={styles.subSave}>Save {formatINRFull(sub.suggested.total_save)}</Text>
+                </View>
+                <TouchableOpacity onPress={() => swapSubstitute(sub)} style={styles.swapBtn} testID={`swap-${i}`}>
+                  <Text style={styles.swapBtnText}>Swap</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
         {Object.entries(byDist).map(([did, items]) => {
           const dist = items[0].distributor;
           const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
@@ -584,4 +686,38 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   emptyBtnText: { color: "#FFF", fontWeight: "800" },
+
+  // Optimizer/Templates actions
+  actionsRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  actionBtn: { flex: 1.4, borderRadius: 12, overflow: "hidden" },
+  actionBtnInner: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10 },
+  actionBtnText: { color: "#FFF", fontWeight: "800", fontSize: 12.5 },
+  actionBtnSecondary: {
+    flex: 1,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    paddingVertical: 10, borderRadius: 12,
+    backgroundColor: colors.primaryBg,
+    borderWidth: 1, borderColor: colors.primary,
+  },
+  actionBtnSecondaryText: { color: colors.primary, fontWeight: "800", fontSize: 12.5 },
+
+  // Substitute card
+  subsCard: {
+    padding: 12, marginBottom: 14,
+    backgroundColor: colors.warningBg,
+    borderRadius: radius.lg,
+    borderWidth: 1, borderColor: "#FCD34D",
+  },
+  subsTitle: { fontWeight: "800", color: colors.warning, fontSize: 13 },
+  subsSub: { color: colors.text, fontSize: 11, marginTop: 4, marginBottom: 8 },
+  subRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 8,
+    borderTopWidth: 1, borderTopColor: "#FCD34D",
+  },
+  subOld: { color: colors.textSecondary, fontSize: 12, fontWeight: "500" },
+  subNew: { color: colors.text, fontWeight: "800" },
+  subSave: { color: colors.success, fontWeight: "800", fontSize: 12, marginTop: 2 },
+  swapBtn: { backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8 },
+  swapBtnText: { color: "#FFF", fontWeight: "800", fontSize: 11 },
 });

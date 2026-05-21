@@ -182,6 +182,102 @@
         agent: "main"
         comment: "Stub GET /api/distributor-portal/dashboard returns received_orders, revenue, pending_payment, active_buyers — placeholder for future distributor-side app."
 
+  - task: "Cart Optimizer + Substitute suggestions + Save Template buttons"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/cart.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added gradient 'Optimize (Save ₹)' button that calls POST /api/cart/optimize — auto-switches every cart line to lowest-PTR distributor and reports savings. Added 'Smart Savings' yellow banner above cart items showing same-salt cheaper brand suggestions with one-tap 'Swap' button. Added 'Templates' button next to Optimize that opens /templates screen."
+
+  - task: "Order Templates (save/load recurring carts)"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/templates.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/templates saves current cart as named template. GET lists templates with sku_count + estimated_value. POST /load merges items into cart. Screen has add modal, delete confirmation, and 'Load into Cart' button per template."
+
+  - task: "Cash Flow Calendar (30-day heat-map of payments)"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/cash-flow.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "GET /api/payments/summary returns total_credit_taken, paid_30d, due_this_week/month, on_hold_disputes, schedule_by_day. Frontend screen renders gradient hero, 3 stat cards, color-graded 30-day calendar heatmap, and upcoming payments list. Linked from Payments tab and More tab."
+
+  - task: "Credit Note creation form"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/credit-note/new.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Form with distributor chips, amount input with live formatting, 7 reason chips (damaged/expired/wrong-supply/return-refund/scheme-adjust/settlement/other), notes textarea. On submit POSTs to /api/credit-notes which reduces distributor.credit_used. Fixed: '/payments/summary' was being shadowed by '/payments/{pid}' route — moved summary endpoint above {pid} registration."
+
+  - task: "Favourites/Watchlist screen"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/favourites.tsx"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "GET/POST/DELETE /api/favourites endpoints. Screen lists starred products with PTR, margin pill, manufacturer, and unstar action."
+
+  - task: "Auto Credit Note on Return + Hold on Disputes"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/returns now also creates a pending Credit Note (status='pending') linked to the return. Amount is on-hold (shown in 'On Hold' tile on Payments tab) until distributor approves. POST /api/returns/{id}/approve flips CN to 'issued' AND reduces distributor.credit_used → ledger gets adjusted accordingly."
+
+  - task: "Payments tab — rich accounting summary"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/(tabs)/payments.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added 4-tile accounting grid showing This Week / Credit Taken (total across all vendors) / Paid 30d / On Hold (disputes). This Week tile taps into Cash Flow Calendar. On Hold taps into Returns. Backend payment_summary aggregates all of this."
+
+  - task: "Sales rep contacts (Call + WhatsApp) in chat thread"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/chat/[id].tsx"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Chat thread topbar now has 3 icons: ledger (receipt), call (tel: link), WhatsApp (wa.me link with pre-filled greeting)."
+
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
@@ -255,3 +351,23 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: "Implemented two major UI changes: (1) modernized Home with gradient hero, animated entrance, redesigned backorder + credit-warning cards; (2) Cart now has per-distributor payment method (Cash vs Credit Line) with live credit availability & progress bar. Backend already supports payment_method=credit via /api/orders. Test focus: visual polish on Home, cart flow with both payment methods (esp. credit when insufficient: button must disable), order placement and credit_used increment."
+  - agent: "testing"
+    message: |
+      Ran /app/backend_test.py against the public preview URL (EXPO_PUBLIC_BACKEND_URL). 31/31 backend assertions passed. Covered:
+      - Auth (send-otp returns dev_otp, verify-otp issues JWT, onboarded=True for demo).
+      - Core: /dashboard, /distributors (5), /orders (4), /payments, /cart all 200.
+      - GET /payments/summary returns ALL required keys (total_credit_taken, total_credit_limit, credit_available, total_due, total_overdue, due_this_week, due_next_week, due_this_month, paid_last_30d, on_hold_disputes, schedule_by_day). All numbers >=0. Route ordering bug (was being shadowed by /payments/{pid}) is FIXED.
+      - POST /cart/optimize → {success, moved, savings} with real savings reported.
+      - GET /cart/substitutes → items contain cart_item_id, current_product, suggested.
+      - POST /cart/items/{id}/swap correctly updates both product_id and distributor_id on the cart line.
+      - Templates: create → list (with sku_count + estimated_value) → load (cart re-populated) → delete (gone). All OK.
+      - Favourites add/list (full product objects returned)/delete. OK.
+      - Recently viewed add+list. OK.
+      - POST /credit-notes reduced distributor.credit_used by exactly 500 (verified before/after).
+      - POST /debit-notes creates DN-XXXX (credit_used unchanged, as designed).
+      - POST /returns creates a return AND auto-creates pending Credit Note linked via return_id. POST /returns/{id}/approve flips CN to "issued" and reduces credit_used by the return amount (verified delta = 250).
+      - GET /ledger/dist-1 returns {distributor, summary, entries[]} with running_balance on every entry.
+      - GET /chat/threads / /chat/{id} / POST /chat (user + auto-reply both returned).
+      - GET /search/comprehensive?q=paracetamol returns 14 matches, each with offers[] containing per-distributor prices (first match has 5 offers). Larger catalog confirmed.
+      - GET /distributor-portal/dashboard returns {received_orders, revenue, pending_payment, active_buyers}.
+      No 4xx/5xx encountered. All new endpoints are working as specified.

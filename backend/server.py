@@ -733,6 +733,59 @@ async def pay_invoice(pid: str, user: dict = Depends(get_current_user)):
     return {"success": True}
 
 
+@api_router.get("/payments/summary")
+async def payment_summary_v1(user: dict = Depends(get_current_user)):
+    """Comprehensive payment overview for accounting (defined early to avoid /{pid} match)."""
+    payments = await db.payments.find({"user_id": user["id"]}, {"_id": 0}).to_list(500)
+    distributors = await db.distributors.find({}, {"_id": 0}).to_list(50)
+
+    total_due = sum(p["amount"] for p in payments if p["status"] in ("due", "overdue"))
+    total_overdue = sum(p["amount"] for p in payments if p["status"] == "overdue")
+    total_paid_30d = sum(
+        p["amount"] for p in payments
+        if p["status"] == "paid" and p.get("paid_at") and (now_utc() - datetime.fromisoformat(p["paid_at"].replace("Z", "+00:00"))).days <= 30
+    )
+    total_credit_taken = sum(d.get("credit_used", 0) for d in distributors)
+    total_credit_limit = sum(d.get("credit_limit", 0) for d in distributors)
+
+    today = now_utc()
+    this_week = next_week = this_month = 0.0
+    schedule_by_day: dict = {}
+    for p in payments:
+        if p["status"] not in ("due", "overdue"):
+            continue
+        try:
+            due = datetime.fromisoformat(p["due_date"].replace("Z", "+00:00"))
+        except Exception:
+            continue
+        diff_days = (due.date() - today.date()).days
+        if 0 <= diff_days <= 7:
+            this_week += p["amount"]
+        if 7 < diff_days <= 14:
+            next_week += p["amount"]
+        if 0 <= diff_days <= 30:
+            this_month += p["amount"]
+        key = due.date().isoformat()
+        schedule_by_day[key] = schedule_by_day.get(key, 0) + p["amount"]
+
+    pending_cn = await db.credit_notes.find({"user_id": user["id"], "status": "pending"}, {"_id": 0}).to_list(100)
+    on_hold = sum(c["amount"] for c in pending_cn)
+
+    return {
+        "total_credit_taken": round(total_credit_taken, 2),
+        "total_credit_limit": round(total_credit_limit, 2),
+        "credit_available": round(total_credit_limit - total_credit_taken, 2),
+        "total_due": round(total_due, 2),
+        "total_overdue": round(total_overdue, 2),
+        "due_this_week": round(this_week, 2),
+        "due_next_week": round(next_week, 2),
+        "due_this_month": round(this_month, 2),
+        "paid_last_30d": round(total_paid_30d, 2),
+        "on_hold_disputes": round(on_hold, 2),
+        "schedule_by_day": schedule_by_day,
+    }
+
+
 @api_router.get("/payments/{pid}")
 async def get_payment(pid: str, user: dict = Depends(get_current_user)):
     p = await db.payments.find_one({"id": pid, "user_id": user["id"]}, {"_id": 0})
@@ -792,9 +845,14 @@ async def list_returns(user: dict = Depends(get_current_user)):
 
 @api_router.post("/returns")
 async def create_return(req: CreateReturnReq, user: dict = Depends(get_current_user)):
+    # Find distributor by name (best-effort)
+    dist = await db.distributors.find_one({"short_name": req.distributor_name}, {"_id": 0})
+    dist_id = dist["id"] if dist else None
+
     item = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
+        "distributor_id": dist_id,
         "product_name": req.product_name,
         "distributor_name": req.distributor_name,
         "reason": req.reason,
@@ -804,7 +862,43 @@ async def create_return(req: CreateReturnReq, user: dict = Depends(get_current_u
         "created_at": iso(now_utc()),
     }
     await db.returns.insert_one({**item})
+
+    # Auto-create a pending Credit Note (status=pending until distributor approves)
+    if dist_id:
+        cn = {
+            "id": str(uuid.uuid4()),
+            "code": f"CN-R{random.randint(2400, 9999)}",
+            "user_id": user["id"],
+            "distributor_id": dist_id,
+            "order_id": None,
+            "return_id": item["id"],
+            "amount": req.amount,
+            "reason": req.reason,
+            "notes": f"Return: {req.qty} units of {req.product_name}",
+            "status": "pending",  # pending → issued (on approval), credit_used adjusted only when issued
+            "created_at": iso(now_utc()),
+        }
+        await db.credit_notes.insert_one({**cn})
+
     return {"success": True, "item": item}
+
+
+# Approve a return → flip credit note to "issued" and reduce credit_used
+@api_router.post("/returns/{return_id}/approve")
+async def approve_return(return_id: str, user: dict = Depends(get_current_user)):
+    ret = await db.returns.find_one({"id": return_id, "user_id": user["id"]}, {"_id": 0})
+    if not ret:
+        raise HTTPException(404, "Not found")
+    await db.returns.update_one({"id": return_id}, {"$set": {"status": "approved"}})
+    cn = await db.credit_notes.find_one({"return_id": return_id, "user_id": user["id"]}, {"_id": 0})
+    if cn and cn.get("status") == "pending":
+        await db.credit_notes.update_one({"id": cn["id"]}, {"$set": {"status": "issued"}})
+        if cn.get("distributor_id"):
+            await db.distributors.update_one(
+                {"id": cn["distributor_id"]},
+                {"$inc": {"credit_used": -cn["amount"]}},
+            )
+    return {"success": True}
 
 
 # ============================================================
@@ -1136,6 +1230,275 @@ async def search_comprehensive(q: str, user: dict = Depends(get_current_user)):
         "matches": [build_row(p) for p in direct],
         "alternatives": [build_row(p) for p in alternatives_raw],
     }
+
+
+# ============================================================
+# PAYMENT SUMMARY (Total credit + Upcoming dues schedule)
+# ============================================================
+@api_router.get("/payments/summary")
+async def payment_summary(user: dict = Depends(get_current_user)):
+    """Comprehensive payment overview for accounting."""
+    payments = await db.payments.find({"user_id": user["id"]}, {"_id": 0}).to_list(500)
+    distributors = await db.distributors.find({}, {"_id": 0}).to_list(50)
+
+    total_due = sum(p["amount"] for p in payments if p["status"] in ("due", "overdue"))
+    total_overdue = sum(p["amount"] for p in payments if p["status"] == "overdue")
+    total_paid_30d = sum(
+        p["amount"] for p in payments
+        if p["status"] == "paid" and p.get("paid_at") and (now_utc() - datetime.fromisoformat(p["paid_at"].replace("Z", "+00:00"))).days <= 30
+    )
+    total_credit_taken = sum(d.get("credit_used", 0) for d in distributors)
+    total_credit_limit = sum(d.get("credit_limit", 0) for d in distributors)
+
+    # Upcoming dues schedule: this week / next week / this month
+    today = now_utc()
+    this_week = next_week = this_month = 0.0
+    schedule_by_day: dict = {}
+    for p in payments:
+        if p["status"] not in ("due", "overdue"):
+            continue
+        try:
+            due = datetime.fromisoformat(p["due_date"].replace("Z", "+00:00"))
+        except Exception:
+            continue
+        diff_days = (due.date() - today.date()).days
+        if 0 <= diff_days <= 7:
+            this_week += p["amount"]
+        if 7 < diff_days <= 14:
+            next_week += p["amount"]
+        if 0 <= diff_days <= 30:
+            this_month += p["amount"]
+        # Per-day for calendar heat map
+        key = due.date().isoformat()
+        schedule_by_day[key] = schedule_by_day.get(key, 0) + p["amount"]
+
+    # On-hold amount from pending credit notes (returns under review)
+    pending_cn = await db.credit_notes.find({"user_id": user["id"], "status": "pending"}, {"_id": 0}).to_list(100)
+    on_hold = sum(c["amount"] for c in pending_cn)
+
+    return {
+        "total_credit_taken": round(total_credit_taken, 2),
+        "total_credit_limit": round(total_credit_limit, 2),
+        "credit_available": round(total_credit_limit - total_credit_taken, 2),
+        "total_due": round(total_due, 2),
+        "total_overdue": round(total_overdue, 2),
+        "due_this_week": round(this_week, 2),
+        "due_next_week": round(next_week, 2),
+        "due_this_month": round(this_month, 2),
+        "paid_last_30d": round(total_paid_30d, 2),
+        "on_hold_disputes": round(on_hold, 2),
+        "schedule_by_day": schedule_by_day,  # dict iso-date → amount
+    }
+
+
+# ============================================================
+# CART OPTIMIZER — auto-switch to lowest PTR distributor
+# ============================================================
+@api_router.post("/cart/optimize")
+async def optimize_cart(user: dict = Depends(get_current_user)):
+    """Switch each cart line to the distributor with lowest PTR for the same product."""
+    cart = await db.cart.find({"user_id": user["id"]}, {"_id": 0}).to_list(100)
+    moved = 0
+    savings = 0.0
+    for it in cart:
+        p = await db.products.find_one({"id": it["product_id"]}, {"_id": 0})
+        if not p or not p.get("prices"):
+            continue
+        # Find lowest-PTR distributor among current distributors
+        lowest = min(p["prices"], key=lambda x: x["ptr"])
+        current = next((x for x in p["prices"] if x["distributor_id"] == it["distributor_id"]), None)
+        if current and lowest["distributor_id"] != it["distributor_id"]:
+            save = (current["ptr"] - lowest["ptr"]) * it["qty"]
+            if save > 0:
+                await db.cart.update_one(
+                    {"id": it["id"]},
+                    {"$set": {"distributor_id": lowest["distributor_id"]}},
+                )
+                moved += 1
+                savings += save
+    return {"success": True, "moved": moved, "savings": round(savings, 2)}
+
+
+# ============================================================
+# SUBSTITUTE SUGGESTIONS — for cart line items
+# ============================================================
+@api_router.get("/cart/substitutes")
+async def cart_substitutes(user: dict = Depends(get_current_user)):
+    """For each cart item, suggest a cheaper same-salt brand if available."""
+    cart = await db.cart.find({"user_id": user["id"]}, {"_id": 0}).to_list(100)
+    out = []
+    for it in cart:
+        p = await db.products.find_one({"id": it["product_id"]}, {"_id": 0})
+        if not p:
+            continue
+        current_ptr = next((x["ptr"] for x in (p.get("prices") or []) if x["distributor_id"] == it["distributor_id"]), p.get("ptr"))
+        # Find same-salt cheaper alternative
+        alts = await db.products.find({"salt": p["salt"], "id": {"$ne": p["id"]}}, {"_id": 0}).to_list(20)
+        best_alt = None
+        best_save = 0
+        for a in alts:
+            for pr in (a.get("prices") or []):
+                save = (current_ptr - pr["ptr"]) * it["qty"]
+                if save > best_save:
+                    best_save = save
+                    best_alt = {"product": a, "offer": pr, "save_per_unit": current_ptr - pr["ptr"], "total_save": save}
+        if best_alt:
+            out.append({
+                "cart_item_id": it["id"],
+                "current_product": {"id": p["id"], "name": p["name"], "ptr": current_ptr},
+                "suggested": {
+                    "product_id": best_alt["product"]["id"],
+                    "product_name": best_alt["product"]["name"],
+                    "manufacturer": best_alt["product"]["manufacturer"],
+                    "distributor_id": best_alt["offer"]["distributor_id"],
+                    "ptr": best_alt["offer"]["ptr"],
+                    "total_save": round(best_alt["total_save"], 2),
+                },
+            })
+    return out
+
+
+@api_router.post("/cart/items/{item_id}/swap")
+async def swap_cart_item(item_id: str, body: dict, user: dict = Depends(get_current_user)):
+    """Swap a cart line to a different product+distributor."""
+    new_pid = body.get("product_id")
+    new_did = body.get("distributor_id")
+    if not new_pid or not new_did:
+        raise HTTPException(400, "product_id and distributor_id required")
+    await db.cart.update_one(
+        {"id": item_id, "user_id": user["id"]},
+        {"$set": {"product_id": new_pid, "distributor_id": new_did}},
+    )
+    return {"success": True}
+
+
+# ============================================================
+# ORDER TEMPLATES — save/load recurring carts
+# ============================================================
+class TemplateReq(BaseModel):
+    name: str
+
+
+@api_router.post("/templates")
+async def save_template(req: TemplateReq, user: dict = Depends(get_current_user)):
+    """Save the current cart as a named template."""
+    cart = await db.cart.find({"user_id": user["id"]}, {"_id": 0}).to_list(100)
+    if not cart:
+        raise HTTPException(400, "Cart is empty")
+    tpl = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "name": req.name.strip(),
+        "items": [{"product_id": c["product_id"], "distributor_id": c["distributor_id"], "qty": c["qty"]} for c in cart],
+        "created_at": iso(now_utc()),
+    }
+    await db.templates.insert_one({**tpl})
+    return {"success": True, "item": tpl}
+
+
+@api_router.get("/templates")
+async def list_templates(user: dict = Depends(get_current_user)):
+    items = await db.templates.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    # Enrich with item count + estimated value
+    for t in items:
+        total = 0.0
+        for it in t["items"]:
+            p = await db.products.find_one({"id": it["product_id"]}, {"_id": 0})
+            if p:
+                pr = next((x["ptr"] for x in (p.get("prices") or []) if x["distributor_id"] == it["distributor_id"]), p.get("ptr", 0))
+                total += pr * it["qty"]
+        t["estimated_value"] = round(total, 2)
+        t["sku_count"] = len(t["items"])
+    return items
+
+
+@api_router.post("/templates/{tid}/load")
+async def load_template(tid: str, user: dict = Depends(get_current_user)):
+    tpl = await db.templates.find_one({"id": tid, "user_id": user["id"]}, {"_id": 0})
+    if not tpl:
+        raise HTTPException(404, "Template not found")
+    for it in tpl["items"]:
+        # Upsert into cart (merge qty if exists)
+        existing = await db.cart.find_one(
+            {"user_id": user["id"], "product_id": it["product_id"], "distributor_id": it["distributor_id"]},
+            {"_id": 0},
+        )
+        if existing:
+            await db.cart.update_one({"id": existing["id"]}, {"$inc": {"qty": it["qty"]}})
+        else:
+            await db.cart.insert_one({
+                "id": str(uuid.uuid4()),
+                "user_id": user["id"],
+                "product_id": it["product_id"],
+                "distributor_id": it["distributor_id"],
+                "qty": it["qty"],
+                "added_at": iso(now_utc()),
+            })
+    return {"success": True, "added": len(tpl["items"])}
+
+
+@api_router.delete("/templates/{tid}")
+async def delete_template(tid: str, user: dict = Depends(get_current_user)):
+    await db.templates.delete_one({"id": tid, "user_id": user["id"]})
+    return {"success": True}
+
+
+# ============================================================
+# FAVOURITES / WATCHLIST
+# ============================================================
+class FavReq(BaseModel):
+    product_id: str
+
+
+@api_router.post("/favourites")
+async def add_favourite(req: FavReq, user: dict = Depends(get_current_user)):
+    await db.favourites.update_one(
+        {"user_id": user["id"], "product_id": req.product_id},
+        {"$set": {"user_id": user["id"], "product_id": req.product_id, "added_at": iso(now_utc())}},
+        upsert=True,
+    )
+    return {"success": True}
+
+
+@api_router.delete("/favourites/{pid}")
+async def del_favourite(pid: str, user: dict = Depends(get_current_user)):
+    await db.favourites.delete_one({"user_id": user["id"], "product_id": pid})
+    return {"success": True}
+
+
+@api_router.get("/favourites")
+async def list_favourites(user: dict = Depends(get_current_user)):
+    favs = await db.favourites.find({"user_id": user["id"]}, {"_id": 0}).sort("added_at", -1).to_list(200)
+    out = []
+    for f in favs:
+        p = await db.products.find_one({"id": f["product_id"]}, {"_id": 0})
+        if p:
+            out.append({**p, "favourited_at": f["added_at"]})
+    return out
+
+
+# ============================================================
+# RECENTLY VIEWED
+# ============================================================
+@api_router.post("/recent/{pid}")
+async def add_recent(pid: str, user: dict = Depends(get_current_user)):
+    await db.recent_views.update_one(
+        {"user_id": user["id"], "product_id": pid},
+        {"$set": {"user_id": user["id"], "product_id": pid, "viewed_at": iso(now_utc())}},
+        upsert=True,
+    )
+    return {"success": True}
+
+
+@api_router.get("/recent")
+async def list_recent(user: dict = Depends(get_current_user)):
+    recent = await db.recent_views.find({"user_id": user["id"]}, {"_id": 0}).sort("viewed_at", -1).to_list(15)
+    out = []
+    for r in recent:
+        p = await db.products.find_one({"id": r["product_id"]}, {"_id": 0})
+        if p:
+            out.append(p)
+    return out
 
 
 @api_router.get("/")
