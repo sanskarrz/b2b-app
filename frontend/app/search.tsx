@@ -1,3 +1,4 @@
+// Comprehensive search results — shows all distributor offers + alternates
 import {
   View,
   Text,
@@ -22,22 +23,37 @@ import { colors, radius, formatINRFull } from "@/src/theme";
 const RECENT = ["Azithromycin", "Paracetamol", "Cetirizine", "Metformin"];
 const QUICK_FILTERS = ["Antibiotic", "Analgesic", "Diabetes", "Cardiac", "Gastric"];
 
+type Offer = {
+  distributor_id: string;
+  distributor_name: string;
+  rating: number;
+  delivery_time: string;
+  ptr: number;
+  mrp: number;
+  scheme?: string | null;
+  margin_pct: number;
+};
+
+type Match = {
+  product: { id: string; name: string; salt: string; manufacturer: string; pack: string; mrp: number; image_emoji: string; category?: string };
+  offers: Offer[];
+  lowest_cost?: { distributor_id: string; distributor_name: string; ptr: number };
+  highest_margin?: { distributor_id: string; distributor_name: string; margin_pct: number };
+};
+
 export default function Search() {
   const router = useRouter();
   const [q, setQ] = useState("");
-  const [distributors, setDistributors] = useState<any[]>([]);
-  const [distFilter, setDistFilter] = useState<string | null>(null);
-  const [results, setResults] = useState<any[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [alternatives, setAlternatives] = useState<Match[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [adding, setAdding] = useState<string | null>(null);
 
   useEffect(() => {
-    api("/distributors").then(setDistributors).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (!q.trim() && !distFilter) {
-      setResults([]);
+    if (!q.trim()) {
+      setMatches([]);
+      setAlternatives([]);
       setSearched(false);
       return;
     }
@@ -45,46 +61,130 @@ export default function Search() {
     setSearched(true);
     const t = setTimeout(async () => {
       try {
-        const params = new URLSearchParams();
-        if (q.trim()) params.set("q", q.trim());
-        if (distFilter) params.set("distributor_id", distFilter);
-        const data = await api(`/products?${params.toString()}`);
-        setResults(data);
+        const data = await api(`/search/comprehensive?q=${encodeURIComponent(q.trim())}`);
+        setMatches(data.matches || []);
+        setAlternatives(data.alternatives || []);
       } finally {
         setLoading(false);
       }
     }, 250);
     return () => clearTimeout(t);
-  }, [q, distFilter]);
-
-  const activeDistName = distFilter ? distributors.find((d) => d.id === distFilter)?.short_name : null;
+  }, [q]);
 
   const runScan = async (mode: "camera" | "library") => {
     try {
-      if (mode === "camera") {
-        const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!perm.granted) {
-          Alert.alert("Permission needed", "Allow camera to scan prescriptions");
-          return;
-        }
-      } else {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) {
-          Alert.alert("Permission needed", "Allow photo access to upload bills");
-          return;
-        }
+      const perm =
+        mode === "camera"
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Permission needed", `Allow ${mode === "camera" ? "camera" : "photos"}`);
+        return;
       }
       const result =
         mode === "camera"
           ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.6, allowsEditing: true })
           : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.6, mediaTypes: ImagePicker.MediaTypeOptions.Images });
       if (result.canceled || !result.assets?.[0]?.base64) return;
-      const b64 = result.assets[0].base64;
-      router.push({ pathname: "/scan-result", params: { image: b64 } });
+      router.push({ pathname: "/scan-result", params: { image: result.assets[0].base64 } });
     } catch (e: any) {
-      Alert.alert("Error", e.message || "Could not capture image");
+      Alert.alert("Error", e.message);
     }
   };
+
+  const addOffer = async (productId: string, offer: Offer) => {
+    const key = `${productId}-${offer.distributor_id}`;
+    setAdding(key);
+    try {
+      await api("/cart/items", {
+        method: "POST",
+        body: { product_id: productId, distributor_id: offer.distributor_id, qty: 1 },
+      });
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setAdding(null);
+    }
+  };
+
+  const renderMatch = (m: Match, isAlt = false) => (
+    <View key={m.product.id} style={[styles.matchCard, isAlt && { borderStyle: "dashed" }]}>
+      <TouchableOpacity
+        style={styles.matchHead}
+        onPress={() => router.push(`/product/${m.product.id}`)}
+        testID={`match-${m.product.id}`}
+      >
+        <View style={styles.thumb}>
+          <Text style={{ fontSize: 24 }}>{m.product.image_emoji}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.pName}>{m.product.name}</Text>
+          <Text style={styles.pSalt}>
+            {m.product.salt} • {m.product.manufacturer}
+          </Text>
+          <Text style={styles.pPack}>
+            {m.product.pack} • MRP {formatINRFull(m.product.mrp)}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+      </TouchableOpacity>
+
+      <View style={styles.offersHead}>
+        <Text style={styles.offersHeadText}>{m.offers.length} distributors offering this</Text>
+      </View>
+
+      {m.offers.map((o) => {
+        const isCheapest = m.lowest_cost?.distributor_id === o.distributor_id;
+        const isBestMargin = m.highest_margin?.distributor_id === o.distributor_id;
+        const key = `${m.product.id}-${o.distributor_id}`;
+        return (
+          <View key={o.distributor_id} style={styles.offerRow}>
+            <View style={{ flex: 1 }}>
+              <View style={styles.offerTopRow}>
+                <Text style={styles.distName}>{o.distributor_name}</Text>
+                {isCheapest && (
+                  <View style={[styles.flagPill, { backgroundColor: "#DCFCE7" }]}>
+                    <Ionicons name="pricetag" size={9} color="#15803D" />
+                    <Text style={[styles.flagText, { color: "#15803D" }]}>LOWEST</Text>
+                  </View>
+                )}
+                {isBestMargin && !isCheapest && (
+                  <View style={[styles.flagPill, { backgroundColor: colors.primaryBg }]}>
+                    <Ionicons name="trending-up" size={9} color={colors.primary} />
+                    <Text style={[styles.flagText, { color: colors.primary }]}>BEST MARGIN</Text>
+                  </View>
+                )}
+                {isBestMargin && isCheapest && (
+                  <View style={[styles.flagPill, { backgroundColor: colors.primaryBg }]}>
+                    <Ionicons name="trending-up" size={9} color={colors.primary} />
+                    <Text style={[styles.flagText, { color: colors.primary }]}>BEST MARGIN</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.distMeta}>
+                ⭐ {o.rating} • {o.delivery_time}
+                {o.scheme ? ` • ${o.scheme}` : ""}
+              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
+                <Text style={styles.ptr}>{formatINRFull(o.ptr)}</Text>
+                <View style={styles.marginPill}>
+                  <Text style={styles.marginPillText}>{o.margin_pct.toFixed(1)}% margin</Text>
+                </View>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.addBtn, adding === key && { opacity: 0.5 }]}
+              onPress={() => addOffer(m.product.id, o)}
+              disabled={adding === key}
+              testID={`add-offer-${o.distributor_id}`}
+            >
+              <Ionicons name={adding === key ? "checkmark" : "add"} size={18} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+        );
+      })}
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -112,7 +212,6 @@ export default function Search() {
           </View>
         </View>
 
-        {/* Scan & Upload actions */}
         <View style={styles.scanRow}>
           <TouchableOpacity style={styles.scanBtn} onPress={() => runScan("camera")} testID="scan-btn">
             <View style={styles.scanIcon}>
@@ -126,32 +225,6 @@ export default function Search() {
           <TouchableOpacity style={styles.uploadBtn} onPress={() => runScan("library")} testID="upload-btn">
             <Ionicons name="cloud-upload-outline" size={22} color={colors.text} />
           </TouchableOpacity>
-        </View>
-
-        {/* Distributor filter row */}
-        <View style={styles.distFilterRow}>
-          <Text style={styles.distFilterLabel}>From:</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-            <TouchableOpacity
-              style={[styles.dPill, !distFilter && styles.dPillActive]}
-              onPress={() => setDistFilter(null)}
-              testID="dist-filter-all"
-            >
-              <Text style={[styles.dPillText, !distFilter && styles.dPillTextActive]}>All vendors</Text>
-            </TouchableOpacity>
-            {distributors.map((d) => (
-              <TouchableOpacity
-                key={d.id}
-                style={[styles.dPill, distFilter === d.id && styles.dPillActive]}
-                onPress={() => setDistFilter(d.id)}
-                testID={`dist-filter-${d.id}`}
-              >
-                <Text style={[styles.dPillText, distFilter === d.id && styles.dPillTextActive]}>
-                  {d.short_name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
         </View>
 
         {!searched ? (
@@ -176,61 +249,28 @@ export default function Search() {
           </ScrollView>
         ) : loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
-        ) : results.length === 0 ? (
+        ) : matches.length === 0 && alternatives.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="search" size={32} color={colors.textTertiary} />
-            <Text style={styles.emptyText}>
-              No products found{q ? ` for "${q}"` : ""}{activeDistName ? ` from ${activeDistName}` : ""}
-            </Text>
+            <Text style={styles.emptyText}>No products found for &quot;{q}&quot;</Text>
           </View>
         ) : (
-          <FlatList
-            data={results}
-            keyExtractor={(i) => i.id}
-            ListHeaderComponent={
-              activeDistName ? (
-                <Text style={styles.resultHint}>
-                  {results.length} products • from {activeDistName}
-                </Text>
-              ) : (
-                <Text style={styles.resultHint}>{results.length} products found</Text>
-              )
-            }
-            contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.card}
-                onPress={() => router.push(`/product/${item.id}`)}
-                testID={`product-${item.id}`}
-              >
-                <View style={styles.thumb}>
-                  <Text style={{ fontSize: 22 }}>{item.image_emoji}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.name}>{item.name}</Text>
-                  <Text style={styles.salt}>
-                    {item.salt} • {item.manufacturer}
-                  </Text>
-                  <Text style={styles.pack}>{item.pack}</Text>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
-                    <Text style={styles.ptr}>{formatINRFull(item.ptr)}</Text>
-                    <Text style={styles.mrp}>MRP {formatINRFull(item.mrp)}</Text>
-                    {item.scheme && (
-                      <View style={styles.schemeBadge}>
-                        <Text style={styles.schemeText}>{item.scheme}</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-                <View style={{ alignItems: "flex-end" }}>
-                  <View style={styles.marginBadge}>
-                    <Text style={styles.marginText}>{item.margin_pct.toFixed(1)}% margin</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} style={{ marginTop: 8 }} />
-                </View>
-              </TouchableOpacity>
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 30 }}>
+            {matches.length > 0 && (
+              <>
+                <Text style={styles.resultHead}>Matched ({matches.length})</Text>
+                {matches.map((m) => renderMatch(m))}
+              </>
             )}
-          />
+            {alternatives.length > 0 && (
+              <>
+                <Text style={[styles.resultHead, { marginTop: 14 }]}>
+                  Alternate brands ({alternatives.length}) — same salt
+                </Text>
+                {alternatives.map((m) => renderMatch(m, true))}
+              </>
+            )}
+          </ScrollView>
         )}
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -262,14 +302,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   input: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 0 },
-  scanRow: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
+  scanRow: { flexDirection: "row", gap: 8, padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
   scanBtn: {
     flex: 1,
     flexDirection: "row",
@@ -303,28 +336,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: colors.surface,
   },
-  distFilterRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.bg,
-  },
-  distFilterLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: "700" },
-  dPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  dPillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  dPillText: { fontSize: 11, fontWeight: "600", color: colors.text },
-  dPillTextActive: { color: "#FFF" },
   sectionLabel: { fontSize: 12, color: colors.textSecondary, fontWeight: "700", marginBottom: 10, letterSpacing: 0.5 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
@@ -339,35 +350,66 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   chipText: { color: colors.text, fontSize: 12, fontWeight: "600" },
-  resultHint: { fontSize: 11, color: colors.textSecondary, fontWeight: "600", marginBottom: 10 },
-  card: {
-    flexDirection: "row",
-    padding: 12,
-    backgroundColor: colors.bg,
+  resultHead: { fontSize: 12, color: colors.textSecondary, fontWeight: "800", letterSpacing: 0.5, marginBottom: 10 },
+  matchCard: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    marginBottom: 10,
-    gap: 12,
+    borderRadius: radius.lg,
+    marginBottom: 12,
+    overflow: "hidden",
+    backgroundColor: colors.bg,
+  },
+  matchHead: {
+    flexDirection: "row",
     alignItems: "center",
+    padding: 12,
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   thumb: {
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.bg,
     alignItems: "center",
     justifyContent: "center",
   },
-  name: { fontSize: 14, fontWeight: "700", color: colors.text },
-  salt: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-  pack: { fontSize: 11, color: colors.textTertiary, marginTop: 1 },
-  ptr: { fontSize: 15, fontWeight: "800", color: colors.text },
-  mrp: { fontSize: 11, color: colors.textTertiary, textDecorationLine: "line-through" },
-  schemeBadge: { backgroundColor: "#FEF3C7", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  schemeText: { fontSize: 10, color: "#92400E", fontWeight: "700" },
-  marginBadge: { backgroundColor: "#DCFCE7", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  marginText: { fontSize: 10, color: "#15803D", fontWeight: "700" },
+  pName: { fontWeight: "800", color: colors.text, fontSize: 14 },
+  pSalt: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
+  pPack: { color: colors.textTertiary, fontSize: 10, marginTop: 2 },
+  offersHead: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  offersHeadText: { color: colors.textSecondary, fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
+  offerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: 10,
+  },
+  offerTopRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  distName: { fontWeight: "700", color: colors.text, fontSize: 13 },
+  distMeta: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
+  ptr: { fontWeight: "800", color: colors.text, fontSize: 16 },
+  marginPill: { backgroundColor: colors.surface, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  marginPillText: { color: colors.textSecondary, fontSize: 10, fontWeight: "700" },
+  flagPill: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  flagText: { fontSize: 9, fontWeight: "800", letterSpacing: 0.3 },
+  addBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   empty: { alignItems: "center", marginTop: 60, gap: 10, paddingHorizontal: 24 },
   emptyText: { color: colors.textSecondary, fontSize: 13, textAlign: "center" },
 });

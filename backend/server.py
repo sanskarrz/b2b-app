@@ -193,9 +193,32 @@ class ReturnItem(BaseModel):
 # ============================================================
 # SEED DATA
 # ============================================================
+def _build_prices(p: dict) -> List[dict]:
+    """Build per-distributor pricing variants from a base product."""
+    import random as _r
+    base_ptr = p["ptr"]
+    mrp = p["mrp"]
+    schemes_pool = ["10+1 Free", "5+1 Free", "10+2 Free", None, None]
+    out = []
+    for i, did in enumerate(p["distributor_ids"]):
+        # Deterministic-ish variance by index
+        variance = (-0.06, 0.0, 0.05, 0.10, -0.03)[i % 5]
+        ptr = round(base_ptr * (1 + variance), 2)
+        margin = round((mrp - ptr) / mrp * 100, 1)
+        scheme = p.get("scheme") if did == p.get("best_distributor_id") else schemes_pool[i % len(schemes_pool)]
+        out.append({"distributor_id": did, "ptr": ptr, "mrp": mrp, "scheme": scheme, "margin_pct": margin})
+    return out
+
+
 async def seed_database():
     """Idempotent seed of distributors, products, sample data."""
     if await db.distributors.count_documents({}) > 0:
+        # Ensure prices[] exists on every product (migration for older seed)
+        async for p in db.products.find({"prices": {"$exists": False}}, {"_id": 0}):
+            await db.products.update_one(
+                {"id": p["id"]},
+                {"$set": {"prices": _build_prices(p)}},
+            )
         return
 
     distributors = [
@@ -221,6 +244,11 @@ async def seed_database():
         {"id": "p-11", "name": "Diclofenac 50mg", "salt": "Diclofenac Sodium", "manufacturer": "Sun Pharma", "pack": "Strip of 10 Tabs", "mrp": 42.00, "ptr": 30.10, "scheme": None, "margin_pct": 20.8, "category": "Analgesic", "distributor_ids": ["dist-3", "dist-5"], "best_distributor_id": "dist-3", "stock_status": "in_stock", "image_emoji": "💊"},
         {"id": "p-12", "name": "Glimepiride 2mg", "salt": "Glimepiride", "manufacturer": "Sanofi", "pack": "Strip of 10 Tabs", "mrp": 95.00, "ptr": 68.40, "scheme": "5+1 Free", "margin_pct": 19.2, "category": "Diabetes", "distributor_ids": ["dist-1", "dist-2", "dist-5"], "best_distributor_id": "dist-5", "stock_status": "low", "image_emoji": "💊"},
     ]
+    products_seed = products
+    products = []
+    for p in products_seed:
+        p["prices"] = _build_prices(p)
+        products.append(p)
     await db.products.insert_many([{**p} for p in products])
 
     logger.info(f"Seeded {len(distributors)} distributors and {len(products)} products")
@@ -543,14 +571,19 @@ async def clear_cart(user: dict = Depends(get_current_user)):
 # ============================================================
 # ORDERS
 # ============================================================
+class PlaceOrderQuery(BaseModel):
+    payment_method: str = "cash"  # cash | credit
+
+
 @api_router.post("/orders")
-async def place_order(distributor_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def place_order(payment_method: str = "cash", distributor_id: Optional[str] = None, user: dict = Depends(get_current_user)):
     query = {"user_id": user["id"]}
     if distributor_id:
         query["distributor_id"] = distributor_id
     cart = await db.cart.find(query, {"_id": 0}).to_list(100)
     if not cart:
         raise HTTPException(400, "Cart is empty")
+    pm = payment_method if payment_method in ("cash", "credit") else "cash"
 
     # Group by distributor → one order per distributor
     by_dist: dict = {}
@@ -567,9 +600,17 @@ async def place_order(distributor_id: Optional[str] = None, user: dict = Depends
             p = await db.products.find_one({"id": it["product_id"]}, {"_id": 0})
             if not p:
                 continue
-            line = p["ptr"] * it["qty"]
+            price_entry = next((pr for pr in (p.get("prices") or []) if pr["distributor_id"] == dist_id), None)
+            unit = price_entry["ptr"] if price_entry else p["ptr"]
+            line = unit * it["qty"]
             total += line
-            order_items.append({"product_id": p["id"], "name": p["name"], "qty": it["qty"], "price": p["ptr"]})
+            order_items.append({"product_id": p["id"], "name": p["name"], "qty": it["qty"], "price": unit})
+        # If credit, check + deduct distributor credit limit
+        if pm == "credit" and d:
+            available = (d.get("credit_limit", 0) - d.get("credit_used", 0))
+            if total > available:
+                raise HTTPException(400, f"Credit insufficient with {d['short_name']}: ₹{available:.0f} available, ₹{total:.0f} required")
+            await db.distributors.update_one({"id": dist_id}, {"$inc": {"credit_used": total}})
         order = {
             "id": str(uuid.uuid4()),
             "code": f"ORD-{code_suffix}",
@@ -580,6 +621,7 @@ async def place_order(distributor_id: Optional[str] = None, user: dict = Depends
             "sku_count": len(order_items),
             "total": total,
             "status": "placed",
+            "payment_method": pm,
             "created_at": iso(now_utc()),
             "eta": iso(now_utc() + timedelta(hours=4)),
         }
@@ -972,6 +1014,74 @@ async def update_profile(req: ProfileUpdateReq, user: dict = Depends(get_current
 # ============================================================
 # HEALTH / ROOT
 # ============================================================
+@api_router.get("/search/comprehensive")
+async def search_comprehensive(q: str, user: dict = Depends(get_current_user)):
+    """Rich search: shows every distributor offering this medicine + alternate-brand substitutes."""
+    q = (q or "").strip()
+    if not q:
+        return {"matches": [], "alternatives": []}
+
+    direct = await db.products.find(
+        {"$or": [{"name": {"$regex": q, "$options": "i"}}, {"manufacturer": {"$regex": q, "$options": "i"}}]},
+        {"_id": 0},
+    ).to_list(20)
+
+    # Find substitutes — same salt, different products
+    salts = list({p["salt"] for p in direct})
+    seen_ids = {p["id"] for p in direct}
+    alternatives_raw: List[dict] = []
+    for salt in salts:
+        alts = await db.products.find(
+            {"salt": salt, "id": {"$nin": list(seen_ids)}}, {"_id": 0}
+        ).to_list(10)
+        alternatives_raw.extend(alts)
+    seen_ids.update(a["id"] for a in alternatives_raw)
+
+    # If salt-based query produced no direct hits, treat as salt search
+    if not direct:
+        direct = await db.products.find(
+            {"salt": {"$regex": q, "$options": "i"}}, {"_id": 0}
+        ).to_list(20)
+
+    dist_map = {d["id"]: d for d in await db.distributors.find({}, {"_id": 0}).to_list(50)}
+
+    def build_row(p: dict) -> dict:
+        prices = p.get("prices") or []
+        offers = []
+        for pr in prices:
+            d = dist_map.get(pr["distributor_id"])
+            if not d:
+                continue
+            offers.append({
+                "distributor_id": pr["distributor_id"],
+                "distributor_name": d["short_name"],
+                "rating": d["rating"],
+                "delivery_time": d["delivery_time"],
+                "ptr": pr["ptr"],
+                "mrp": pr.get("mrp", p["mrp"]),
+                "scheme": pr.get("scheme"),
+                "margin_pct": pr.get("margin_pct"),
+            })
+        offers.sort(key=lambda x: x["ptr"])
+        lowest = offers[0] if offers else None
+        highest_margin = max(offers, key=lambda x: x["margin_pct"]) if offers else None
+        return {
+            "product": {
+                "id": p["id"], "name": p["name"], "salt": p["salt"], "manufacturer": p["manufacturer"],
+                "pack": p["pack"], "mrp": p["mrp"], "image_emoji": p.get("image_emoji", "💊"),
+                "category": p.get("category"),
+            },
+            "offers": offers,
+            "lowest_cost": {"distributor_id": lowest["distributor_id"], "distributor_name": lowest["distributor_name"], "ptr": lowest["ptr"]} if lowest else None,
+            "highest_margin": {"distributor_id": highest_margin["distributor_id"], "distributor_name": highest_margin["distributor_name"], "margin_pct": highest_margin["margin_pct"]} if highest_margin else None,
+        }
+
+    return {
+        "matches": [build_row(p) for p in direct],
+        "alternatives": [build_row(p) for p in alternatives_raw],
+    }
+
+
 @api_router.get("/")
 async def root():
     return {"message": "RX Tech API"}

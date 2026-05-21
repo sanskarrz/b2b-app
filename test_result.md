@@ -101,3 +101,73 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "B2B medicine marketplace (RX Tech) — modernize Home screen, polish backorder buttons, show per-distributor pricing (alternate brands + lowest cost + best margin), credit-line payment selector per distributor in Cart."
+
+frontend:
+  - task: "Modernized Home screen with gradient hero + polished backorder/credit cards"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/home.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Replaced flat TopBar with custom LinearGradient hero (peach→orange) showing greeting + shop name pill + notif/cart icons. Floating search bar with scan affordance. QuickAction tiles use color-tinted gradients. KPI cards get top-border accents + icons. AI Insights moved to a soft-gradient banner. Action Required section refactored: Credit Risk now has dedicated card with circular % indicator, gradient progress bar, 'Pay Now' CTA. Backorder card has icon avatar, qty pill, and two CTA buttons: 'Keep Waiting' (secondary) and gradient 'Switch Distributor' (primary). Profit Opportunities polished with icon avatars + tag pills. Animated entrance via reanimated FadeInUp."
+
+  - task: "Cart screen with per-distributor payment method (Cash vs Credit Line)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/cart.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Added per-distributor payment method toggle (Cash/UPI vs Credit Line). When Credit Line is chosen, a dynamic credit-usage panel renders showing available credit, usage progress bar (color-coded: green<60%, amber<85%, red≥85%), and post-order remaining. If subtotal > available credit, the option turns red and the place-order button disables. Each distributor group has its own gradient 'Place order' button that calls /api/orders with payment_method=cash|credit and distributor_id. Replaced Alert.alert with cross-platform choice() helper. Bottom 'Place ALL' aggregates: uses credit if any distributor has selected=credit AND feasible, else cash."
+
+  - task: "Comprehensive search with distributor offers, lowest cost, best margin, alt brands"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/search.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Already implemented in prior session — uses /api/search/comprehensive. Renders all distributor offers per product with LOWEST and BEST MARGIN flags, plus alternate-brand (same salt) section."
+
+backend:
+  - task: "POST /orders with payment_method=credit and credit-limit deduction"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Existing endpoint accepts payment_method (cash|credit). When credit, validates distributor.credit_limit - credit_used >= total and atomically $incs credit_used. Frontend now consumes this."
+
+metadata:
+  created_by: "main_agent"
+  version: "2.0"
+  test_sequence: 2
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Modernized Home screen with gradient hero + polished backorder/credit cards"
+    - "Cart screen with per-distributor payment method (Cash vs Credit Line)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: "Implemented two major UI changes: (1) modernized Home with gradient hero, animated entrance, redesigned backorder + credit-warning cards; (2) Cart now has per-distributor payment method (Cash vs Credit Line) with live credit availability & progress bar. Backend already supports payment_method=credit via /api/orders. Test focus: visual polish on Home, cart flow with both payment methods (esp. credit when insufficient: button must disable), order placement and credit_used increment."
