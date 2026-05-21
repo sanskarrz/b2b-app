@@ -51,6 +51,7 @@ export default function More() {
     {
       title: "Operations",
       items: [
+        { icon: "chatbubbles-outline", label: "Messages (Distributor Chat)", onPress: () => router.push("/chat"), testID: "more-chat" },
         { icon: "list-outline", label: "Shortbook (Auto-reorder)", onPress: () => router.push("/shortbook"), testID: "more-shortbook" },
         { icon: "return-up-back-outline", label: "Returns & Refunds", onPress: () => router.push("/returns"), testID: "more-returns" },
         { icon: "cube-outline", label: "Bulk Order", onPress: () => router.push("/bulk-order"), testID: "more-bulk" },

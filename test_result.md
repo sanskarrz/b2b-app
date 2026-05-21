@@ -98,6 +98,90 @@
 
 
 
+  - task: "Comprehensive Indian medicine catalog (260 SKUs) + multi-brand search"
+    implemented: true
+    working: true
+    file: "/app/backend/seed_catalog.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Created /app/backend/seed_catalog.py with 60+ salts × 3-6 brand variants = 260 SKUs across Antibiotic/Analgesic/Cardiac/Diabetes/Gastric/Antihistamine/Respiratory/Vitamin/Antifungal/Thyroid/Steroid/Neuro/Antiviral/Urology/Dermatology/Pediatric/Contraceptive categories. Each SKU has 2-5 distributor offers with deterministic price/margin variance. Server auto-migrates from 12 → 260 products on next boot. Search by brand (e.g. 'Dolo') returns matches + same-salt alternates."
+
+  - task: "Per-distributor Ledger with bills, payments, credit/debit notes, running balance"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added GET /api/ledger/{distributor_id} returning chronologically sorted bill/payment/credit-note/debit-note entries with running balance, plus summary (total bills, paid, due, overdue, credit notes, debit notes, closing balance, credit available). Frontend screen /app/ledger/[id].tsx renders gradient hero with closing balance, action buttons (Pay/CN/Chat), summary grid, Credit Line card with usage bar & early-settlement discount, filter chips, and entry list."
+
+  - task: "Credit Notes & Debit Notes endpoints with credit_used adjustment"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added POST/GET /api/credit-notes and /api/debit-notes. Credit notes auto-reduce distributor.credit_used (frees up credit line). Each gets a unique CN-XXXX / DN-XXXX code."
+
+  - task: "GST Invoice breakdown (CGST+SGST or IGST)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added GET /api/orders/{order_id}/invoice returning taxable_value + cgst/sgst (intra-state) or igst (inter-state) + per-line gst split. Pharma standard 12% (6+6)."
+
+  - task: "Chat (per distributor) with order-attach + auto-reply"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added /api/chat/threads, /api/chat/{distributor_id} (history + auto-mark-read), POST /api/chat (with optional attach_order_id). Auto-reply stub based on keywords (delivery, scheme, credit, return). Frontend: /app/chat/index.tsx (thread list with unread badges) and /app/chat/[id].tsx (1-on-1 chat with order picker modal). Seeded demo conversations for dist-1 and dist-3."
+
+  - task: "Vendor Ledger carousel on Payments tab"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/(tabs)/payments.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Payments tab now shows horizontal carousel of all 5 distributors with avatar, credit-days pill, usage progress bar (color-coded), available credit and percentage. Tap → opens full ledger."
+
+  - task: "Distributor portal stub endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Stub GET /api/distributor-portal/dashboard returns received_orders, revenue, pending_payment, active_buyers — placeholder for future distributor-side app."
+
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================

@@ -6,6 +6,7 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from "react-native";
 import { useEffect, useState, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -28,14 +29,19 @@ export default function Payments() {
   const [tab, setTab] = useState("all");
   const [items, setItems] = useState<any[]>([]);
   const [summary, setSummary] = useState({ total_due: 0, total_overdue: 0 });
+  const [distributors, setDistributors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api(`/payments${tab !== "all" ? `?status=${tab}` : ""}`);
+      const [data, dists] = await Promise.all([
+        api(`/payments${tab !== "all" ? `?status=${tab}` : ""}`),
+        api(`/distributors`),
+      ]);
       setItems(data.items);
       setSummary({ total_due: data.total_due, total_overdue: data.total_overdue });
+      setDistributors(dists);
     } finally {
       setLoading(false);
     }
@@ -73,6 +79,53 @@ export default function Payments() {
           <Text style={[styles.sumLabel, { color: colors.danger }]}>Overdue</Text>
           <Text style={[styles.sumValue, { color: colors.danger }]}>{formatINRFull(summary.total_overdue)}</Text>
         </View>
+      </View>
+
+      {/* Vendor Ledger carousel */}
+      <View style={{ marginTop: 18 }}>
+        <View style={styles.ledgerHead}>
+          <Text style={styles.ledgerHeadTitle}>Vendor Ledgers</Text>
+          <Text style={styles.ledgerHeadSub}>Tap to open full ledger</Text>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
+        >
+          {distributors.map((d: any) => {
+            const used = d.credit_used || 0;
+            const limit = d.credit_limit || 1;
+            const pct = Math.min((used / limit) * 100, 100);
+            const avail = limit - used;
+            const colorBar = pct >= 85 ? colors.danger : pct >= 60 ? colors.warning : colors.success;
+            return (
+              <TouchableOpacity
+                key={d.id}
+                style={styles.ledgerCard}
+                onPress={() => router.push(`/ledger/${d.id}`)}
+                testID={`ledger-${d.id}`}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <View style={styles.ledgerAvatar}>
+                    <Text style={styles.ledgerAvatarText}>{d.short_name.charAt(0)}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.ledgerName} numberOfLines={1}>{d.short_name}</Text>
+                    <Text style={styles.ledgerDays}>{d.credit_days || 30}d credit</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                </View>
+                <View style={[styles.ledgerTrack, { marginTop: 10 }]}>
+                  <View style={[styles.ledgerFill, { width: `${pct}%`, backgroundColor: colorBar }]} />
+                </View>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
+                  <Text style={styles.ledgerFootText}>Avail {formatINRFull(avail)}</Text>
+                  <Text style={[styles.ledgerFootText, { color: colorBar, fontWeight: "700" }]}>{pct.toFixed(0)}%</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
       <View style={styles.tabs}>
@@ -201,4 +254,33 @@ const styles = StyleSheet.create({
   paidText: { color: "#15803D", fontWeight: "700", fontSize: 11 },
   empty: { alignItems: "center", marginTop: 80, gap: 10 },
   emptyText: { color: colors.textSecondary, fontSize: 14 },
+
+  ledgerHead: {
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+  },
+  ledgerHeadTitle: { fontSize: 14, color: colors.text, fontWeight: "800" },
+  ledgerHeadSub: { fontSize: 10, color: colors.textSecondary, fontWeight: "600" },
+  ledgerCard: {
+    width: 200,
+    padding: 12,
+    backgroundColor: "#FFF",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  ledgerAvatar: {
+    width: 30, height: 30, borderRadius: 9,
+    backgroundColor: colors.primaryBg, borderWidth: 1, borderColor: colors.primary,
+    alignItems: "center", justifyContent: "center",
+  },
+  ledgerAvatarText: { color: colors.primary, fontWeight: "800", fontSize: 12 },
+  ledgerName: { fontSize: 12.5, fontWeight: "800", color: colors.text },
+  ledgerDays: { fontSize: 10, color: colors.textSecondary, marginTop: 2, fontWeight: "600" },
+  ledgerTrack: { height: 6, backgroundColor: colors.surface, borderRadius: 999, overflow: "hidden" },
+  ledgerFill: { height: "100%", borderRadius: 999 },
+  ledgerFootText: { fontSize: 10, color: colors.textSecondary, fontWeight: "600" },
 });

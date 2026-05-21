@@ -211,24 +211,45 @@ def _build_prices(p: dict) -> List[dict]:
 
 
 async def seed_database():
-    """Idempotent seed of distributors, products, sample data."""
-    if await db.distributors.count_documents({}) > 0:
-        # Ensure prices[] exists on every product (migration for older seed)
-        async for p in db.products.find({"prices": {"$exists": False}}, {"_id": 0}):
-            await db.products.update_one(
-                {"id": p["id"]},
-                {"$set": {"prices": _build_prices(p)}},
-            )
-        return
+    """Idempotent seed of distributors, products, sample data.
+
+    Re-seeds product catalog when the existing count is much smaller than the
+    bundled Indian-medicine catalog (allows upgrading older deployments).
+    """
+    from seed_catalog import build_products, get_product_count  # local import
+
+    target_product_count = get_product_count()
 
     distributors = [
-        {"id": "dist-1", "name": "ABC Pharma Distributors", "short_name": "ABC Pharma", "rating": 4.7, "delivery_time": "Today 6 PM", "min_order": 2000, "location": "Mumbai", "gst": "27AABCU9603R1ZX", "categories": ["Antibiotics", "Diabetes", "Cardiac"], "discount_label": "Up to 18% off", "credit_limit": 200000, "credit_used": 184000},
-        {"id": "dist-2", "name": "Medline Distributors Pvt Ltd", "short_name": "Medline Distr.", "rating": 4.5, "delivery_time": "Tomorrow", "min_order": 1500, "location": "Pune", "gst": "27ABCDE1234F1Z5", "categories": ["General", "Pediatric"], "discount_label": "Up to 14% off", "credit_limit": 150000, "credit_used": 42000},
-        {"id": "dist-3", "name": "XYZ Pharma Wholesale", "short_name": "XYZ Pharma", "rating": 4.6, "delivery_time": "Today 8 PM", "min_order": 1000, "location": "Mumbai", "gst": "27XYZAB5678C1Z9", "categories": ["Antibiotics", "Generic", "Dermatology"], "discount_label": "Up to 22% off", "credit_limit": 100000, "credit_used": 18500},
-        {"id": "dist-4", "name": "HealthFirst Distribution", "short_name": "HealthFirst", "rating": 4.3, "delivery_time": "Tomorrow", "min_order": 3000, "location": "Thane", "gst": "27HEAL1234F1Z7", "categories": ["Surgical", "Devices"], "discount_label": "Up to 12% off", "credit_limit": 80000, "credit_used": 0},
-        {"id": "dist-5", "name": "Sun Wholesale Pharma", "short_name": "Sun Wholesale", "rating": 4.4, "delivery_time": "Today 7 PM", "min_order": 1500, "location": "Mumbai", "gst": "27SUNWS998P1Z1", "categories": ["Generic", "Antibiotics"], "discount_label": "Up to 16% off", "credit_limit": 120000, "credit_used": 31000},
+        {"id": "dist-1", "name": "ABC Pharma Distributors", "short_name": "ABC Pharma", "rating": 4.7, "delivery_time": "Today 6 PM", "min_order": 2000, "location": "Mumbai", "state_code": "27", "gst": "27AABCU9603R1ZX", "categories": ["Antibiotics", "Diabetes", "Cardiac"], "discount_label": "Up to 18% off", "credit_limit": 200000, "credit_used": 184000, "credit_days": 21, "settlement_discount_pct": 1.5},
+        {"id": "dist-2", "name": "Medline Distributors Pvt Ltd", "short_name": "Medline Distr.", "rating": 4.5, "delivery_time": "Tomorrow", "min_order": 1500, "location": "Pune", "state_code": "27", "gst": "27ABCDE1234F1Z5", "categories": ["General", "Pediatric"], "discount_label": "Up to 14% off", "credit_limit": 150000, "credit_used": 42000, "credit_days": 30, "settlement_discount_pct": 2.0},
+        {"id": "dist-3", "name": "XYZ Pharma Wholesale", "short_name": "XYZ Pharma", "rating": 4.6, "delivery_time": "Today 8 PM", "min_order": 1000, "location": "Mumbai", "state_code": "27", "gst": "27XYZAB5678C1Z9", "categories": ["Antibiotics", "Generic", "Dermatology"], "discount_label": "Up to 22% off", "credit_limit": 100000, "credit_used": 18500, "credit_days": 15, "settlement_discount_pct": 1.0},
+        {"id": "dist-4", "name": "HealthFirst Distribution", "short_name": "HealthFirst", "rating": 4.3, "delivery_time": "Tomorrow", "min_order": 3000, "location": "Thane", "state_code": "27", "gst": "27HEAL1234F1Z7", "categories": ["Surgical", "Devices"], "discount_label": "Up to 12% off", "credit_limit": 80000, "credit_used": 0, "credit_days": 30, "settlement_discount_pct": 1.0},
+        {"id": "dist-5", "name": "Sun Wholesale Pharma", "short_name": "Sun Wholesale", "rating": 4.4, "delivery_time": "Today 7 PM", "min_order": 1500, "location": "Mumbai", "state_code": "27", "gst": "27SUNWS998P1Z1", "categories": ["Generic", "Antibiotics"], "discount_label": "Up to 16% off", "credit_limit": 120000, "credit_used": 31000, "credit_days": 21, "settlement_discount_pct": 1.5},
     ]
-    await db.distributors.insert_many([{**d} for d in distributors])
+
+    if await db.distributors.count_documents({}) == 0:
+        await db.distributors.insert_many([{**d} for d in distributors])
+    else:
+        # Backfill new fields on existing distributors
+        for d in distributors:
+            await db.distributors.update_one(
+                {"id": d["id"]},
+                {"$set": {k: v for k, v in d.items() if k in ("credit_days", "settlement_discount_pct", "state_code")}},
+            )
+
+    # Refresh products: if catalog is significantly larger than existing, re-seed
+    current = await db.products.count_documents({})
+    if current < target_product_count:
+        await db.products.delete_many({})
+        big_catalog = build_products()
+        await db.products.insert_many([{**p} for p in big_catalog])
+        logger.info(f"Catalog refreshed: {current} → {len(big_catalog)} products")
+        return
+
+    # Legacy code below kept for backward-compat seeding fallback
+    if current > 0:
+        return
 
     products = [
         {"id": "p-1", "name": "Azithromycin 500mg", "salt": "Azithromycin", "manufacturer": "Cipla", "pack": "Strip of 3 Tabs", "mrp": 78.50, "ptr": 54.20, "scheme": "10+1 Free", "margin_pct": 23.5, "category": "Antibiotic", "distributor_ids": ["dist-1", "dist-3", "dist-5"], "best_distributor_id": "dist-3", "stock_status": "in_stock", "image_emoji": "💊"},
@@ -255,48 +276,76 @@ async def seed_database():
 
 
 async def seed_user_data(user_id: str):
-    """Seed sample orders, payments, returns for a user upon first login."""
-    if await db.orders.count_documents({"user_id": user_id}) > 0:
-        return
+    """Seed sample orders, payments, returns for a user upon first login.
 
+    Per-collection idempotency — each block only inserts if the user has none.
+    """
     base = now_utc()
-    orders = [
-        {"id": str(uuid.uuid4()), "code": "ORD-2340", "user_id": user_id, "items": [{"product_id": "p-1", "name": "Azithromycin 500mg", "qty": 30, "price": 54.20}, {"product_id": "p-2", "name": "Paracetamol 650mg", "qty": 50, "price": 32.50}, {"product_id": "p-6", "name": "Cetirizine 10mg", "qty": 40, "price": 22.40}], "distributor_id": "dist-3", "distributor_name": "XYZ Pharma", "sku_count": 3, "total": 12450.00, "status": "placed", "created_at": iso(base - timedelta(hours=3)), "eta": iso(base + timedelta(hours=4))},
-        {"id": str(uuid.uuid4()), "code": "ORD-2341", "user_id": user_id, "items": [{"product_id": "p-4", "name": "Amlodipine 5mg", "qty": 20, "price": 40.80}, {"product_id": "p-7", "name": "Atorvastatin 10mg", "qty": 25, "price": 78.00}], "distributor_id": "dist-1", "distributor_name": "ABC Pharma", "sku_count": 2, "total": 8650.00, "status": "processing", "created_at": iso(base - timedelta(hours=6)), "eta": iso(base + timedelta(hours=2))},
-        {"id": str(uuid.uuid4()), "code": "ORD-2342", "user_id": user_id, "items": [{"product_id": "p-5", "name": "Pantoprazole 40mg", "qty": 30, "price": 89.50}], "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "sku_count": 1, "total": 6450.00, "status": "shipped", "created_at": iso(base - timedelta(hours=8)), "eta": iso(base + timedelta(hours=1))},
-        {"id": str(uuid.uuid4()), "code": "ORD-2338", "user_id": user_id, "items": [{"product_id": "p-9", "name": "Amoxicillin 500mg", "qty": 50, "price": 66.00}], "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "sku_count": 4, "total": 14750.00, "status": "delivered", "created_at": iso(base - timedelta(days=1)), "eta": None},
-    ]
-    await db.orders.insert_many(orders)
 
-    payments = [
-        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-1", "distributor_name": "ABC Pharma", "invoice_code": "INV-12934", "amount": 42300.00, "due_date": iso(base + timedelta(hours=4)), "status": "due", "days_to_due": 0},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-3", "distributor_name": "XYZ Pharma", "invoice_code": "INV-12891", "amount": 18650.00, "due_date": iso(base + timedelta(days=3)), "status": "due", "days_to_due": 3},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-2", "distributor_name": "Medline Distr.", "invoice_code": "INV-12702", "amount": 9250.00, "due_date": iso(base - timedelta(days=2)), "status": "overdue", "days_to_due": -2},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "invoice_code": "INV-12660", "amount": 14750.00, "due_date": iso(base - timedelta(days=10)), "status": "paid", "days_to_due": -10, "paid_at": iso(base - timedelta(days=8))},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-1", "distributor_name": "ABC Pharma", "invoice_code": "INV-12598", "amount": 28400.00, "due_date": iso(base - timedelta(days=15)), "status": "paid", "days_to_due": -15, "paid_at": iso(base - timedelta(days=14))},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-3", "distributor_name": "XYZ Pharma", "invoice_code": "INV-12511", "amount": 11200.00, "due_date": iso(base - timedelta(days=20)), "status": "paid", "days_to_due": -20, "paid_at": iso(base - timedelta(days=18))},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-2", "distributor_name": "Medline Distr.", "invoice_code": "INV-12440", "amount": 7850.00, "due_date": iso(base - timedelta(days=25)), "status": "paid", "days_to_due": -25, "paid_at": iso(base - timedelta(days=22))},
-    ]
-    await db.payments.insert_many(payments)
+    if await db.orders.count_documents({"user_id": user_id}) == 0:
+        orders = [
+            {"id": str(uuid.uuid4()), "code": "ORD-2340", "user_id": user_id, "items": [{"product_id": "p-1", "name": "Azithromycin 500mg", "qty": 30, "price": 54.20}, {"product_id": "p-2", "name": "Paracetamol 650mg", "qty": 50, "price": 32.50}, {"product_id": "p-6", "name": "Cetirizine 10mg", "qty": 40, "price": 22.40}], "distributor_id": "dist-3", "distributor_name": "XYZ Pharma", "sku_count": 3, "total": 12450.00, "status": "placed", "created_at": iso(base - timedelta(hours=3)), "eta": iso(base + timedelta(hours=4))},
+            {"id": str(uuid.uuid4()), "code": "ORD-2341", "user_id": user_id, "items": [{"product_id": "p-4", "name": "Amlodipine 5mg", "qty": 20, "price": 40.80}, {"product_id": "p-7", "name": "Atorvastatin 10mg", "qty": 25, "price": 78.00}], "distributor_id": "dist-1", "distributor_name": "ABC Pharma", "sku_count": 2, "total": 8650.00, "status": "processing", "created_at": iso(base - timedelta(hours=6)), "eta": iso(base + timedelta(hours=2))},
+            {"id": str(uuid.uuid4()), "code": "ORD-2342", "user_id": user_id, "items": [{"product_id": "p-5", "name": "Pantoprazole 40mg", "qty": 30, "price": 89.50}], "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "sku_count": 1, "total": 6450.00, "status": "shipped", "created_at": iso(base - timedelta(hours=8)), "eta": iso(base + timedelta(hours=1))},
+            {"id": str(uuid.uuid4()), "code": "ORD-2338", "user_id": user_id, "items": [{"product_id": "p-9", "name": "Amoxicillin 500mg", "qty": 50, "price": 66.00}], "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "sku_count": 4, "total": 14750.00, "status": "delivered", "created_at": iso(base - timedelta(days=1)), "eta": None},
+        ]
+        await db.orders.insert_many(orders)
 
-    returns = [
-        {"id": str(uuid.uuid4()), "user_id": user_id, "product_name": "Paracetamol 650mg", "distributor_name": "Medline Distr.", "reason": "Damaged packaging", "qty": 10, "amount": 325.00, "status": "approved", "created_at": iso(base - timedelta(days=2))},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "product_name": "Atorvastatin 10mg", "distributor_name": "ABC Pharma", "reason": "Near expiry", "qty": 5, "amount": 390.00, "status": "requested", "created_at": iso(base - timedelta(hours=12))},
-    ]
-    await db.returns.insert_many(returns)
+    if await db.payments.count_documents({"user_id": user_id}) == 0:
+        payments = [
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-1", "distributor_name": "ABC Pharma", "invoice_code": "INV-12934", "amount": 42300.00, "due_date": iso(base + timedelta(hours=4)), "status": "due", "days_to_due": 0},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-3", "distributor_name": "XYZ Pharma", "invoice_code": "INV-12891", "amount": 18650.00, "due_date": iso(base + timedelta(days=3)), "status": "due", "days_to_due": 3},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-2", "distributor_name": "Medline Distr.", "invoice_code": "INV-12702", "amount": 9250.00, "due_date": iso(base - timedelta(days=2)), "status": "overdue", "days_to_due": -2},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "invoice_code": "INV-12660", "amount": 14750.00, "due_date": iso(base - timedelta(days=10)), "status": "paid", "days_to_due": -10, "paid_at": iso(base - timedelta(days=8))},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-1", "distributor_name": "ABC Pharma", "invoice_code": "INV-12598", "amount": 28400.00, "due_date": iso(base - timedelta(days=15)), "status": "paid", "days_to_due": -15, "paid_at": iso(base - timedelta(days=14))},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-3", "distributor_name": "XYZ Pharma", "invoice_code": "INV-12511", "amount": 11200.00, "due_date": iso(base - timedelta(days=20)), "status": "paid", "days_to_due": -20, "paid_at": iso(base - timedelta(days=18))},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-2", "distributor_name": "Medline Distr.", "invoice_code": "INV-12440", "amount": 7850.00, "due_date": iso(base - timedelta(days=25)), "status": "paid", "days_to_due": -25, "paid_at": iso(base - timedelta(days=22))},
+        ]
+        await db.payments.insert_many(payments)
 
-    # Shortbook entries — auto reorder candidates
-    shortbook = [
-        {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-3", "product_name": "Metformin 500mg", "current_stock": 8, "min_level": 30, "suggested_qty": 50, "estimated_value": 1320.00},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-12", "product_name": "Glimepiride 2mg", "current_stock": 12, "min_level": 25, "suggested_qty": 30, "estimated_value": 2052.00},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-6", "product_name": "Cetirizine 10mg", "current_stock": 15, "min_level": 40, "suggested_qty": 60, "estimated_value": 1344.00},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-11", "product_name": "Diclofenac 50mg", "current_stock": 5, "min_level": 25, "suggested_qty": 40, "estimated_value": 1204.00},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-9", "product_name": "Amoxicillin 500mg", "current_stock": 18, "min_level": 50, "suggested_qty": 60, "estimated_value": 3960.00},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-2", "product_name": "Paracetamol 650mg", "current_stock": 22, "min_level": 60, "suggested_qty": 80, "estimated_value": 2600.00},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-8", "product_name": "Omeprazole 20mg", "current_stock": 10, "min_level": 30, "suggested_qty": 40, "estimated_value": 1808.00},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-4", "product_name": "Amlodipine 5mg", "current_stock": 14, "min_level": 35, "suggested_qty": 45, "estimated_value": 1836.00},
-    ]
-    await db.shortbook.insert_many(shortbook)
+    if await db.returns.count_documents({"user_id": user_id}) == 0:
+        returns = [
+            {"id": str(uuid.uuid4()), "user_id": user_id, "product_name": "Paracetamol 650mg", "distributor_name": "Medline Distr.", "reason": "Damaged packaging", "qty": 10, "amount": 325.00, "status": "approved", "created_at": iso(base - timedelta(days=2))},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "product_name": "Atorvastatin 10mg", "distributor_name": "ABC Pharma", "reason": "Near expiry", "qty": 5, "amount": 390.00, "status": "requested", "created_at": iso(base - timedelta(hours=12))},
+        ]
+        await db.returns.insert_many(returns)
+
+    if await db.shortbook.count_documents({"user_id": user_id}) == 0:
+        shortbook = [
+            {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-3", "product_name": "Metformin 500mg", "current_stock": 8, "min_level": 30, "suggested_qty": 50, "estimated_value": 1320.00},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-12", "product_name": "Glimepiride 2mg", "current_stock": 12, "min_level": 25, "suggested_qty": 30, "estimated_value": 2052.00},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-6", "product_name": "Cetirizine 10mg", "current_stock": 15, "min_level": 40, "suggested_qty": 60, "estimated_value": 1344.00},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-11", "product_name": "Diclofenac 50mg", "current_stock": 5, "min_level": 25, "suggested_qty": 40, "estimated_value": 1204.00},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-9", "product_name": "Amoxicillin 500mg", "current_stock": 18, "min_level": 50, "suggested_qty": 60, "estimated_value": 3960.00},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-2", "product_name": "Paracetamol 650mg", "current_stock": 22, "min_level": 60, "suggested_qty": 80, "estimated_value": 2600.00},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-8", "product_name": "Omeprazole 20mg", "current_stock": 10, "min_level": 30, "suggested_qty": 40, "estimated_value": 1808.00},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "product_id": "p-4", "product_name": "Amlodipine 5mg", "current_stock": 14, "min_level": 35, "suggested_qty": 45, "estimated_value": 1836.00},
+        ]
+        await db.shortbook.insert_many(shortbook)
+
+    if await db.credit_notes.count_documents({"user_id": user_id}) == 0:
+        credit_notes = [
+            {"id": str(uuid.uuid4()), "code": "CN-2401", "user_id": user_id, "distributor_id": "dist-1", "order_id": None, "amount": 1240.00, "reason": "return-refund", "notes": "5 strips Atorvastatin returned — near expiry", "status": "issued", "created_at": iso(base - timedelta(days=4))},
+            {"id": str(uuid.uuid4()), "code": "CN-2402", "user_id": user_id, "distributor_id": "dist-2", "order_id": None, "amount": 325.00, "reason": "damaged", "notes": "Damaged packaging — Paracetamol 650", "status": "issued", "created_at": iso(base - timedelta(days=2))},
+        ]
+        await db.credit_notes.insert_many(credit_notes)
+
+    if await db.debit_notes.count_documents({"user_id": user_id}) == 0:
+        debit_notes = [
+            {"id": str(uuid.uuid4()), "code": "DN-2401", "user_id": user_id, "distributor_id": "dist-3", "order_id": None, "amount": 480.00, "reason": "short-supply", "notes": "Short by 8 strips Levocetirizine in INV-12891", "status": "issued", "created_at": iso(base - timedelta(days=1))},
+        ]
+        await db.debit_notes.insert_many(debit_notes)
+
+    if await db.chat_messages.count_documents({"user_id": user_id}) == 0:
+        chats = [
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-1", "sender": "user", "message": "Hi, when will INV-12934 be delivered?", "read": True, "created_at": iso(base - timedelta(hours=5))},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-1", "sender": "distributor", "message": "Hi! INV-12934 will be delivered today by 6 PM. Driver Rajesh — 98XXXXXX21.", "read": True, "created_at": iso(base - timedelta(hours=4, minutes=58))},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-1", "sender": "user", "message": "Got it. Any scheme on Pantoprazole?", "read": True, "created_at": iso(base - timedelta(hours=4, minutes=50))},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-1", "sender": "distributor", "message": "Yes — 10+1 on Pan 40 this week. Bulk >₹10K gets extra 5% off.", "read": False, "created_at": iso(base - timedelta(hours=4, minutes=48))},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-3", "sender": "user", "message": "Please send latest price list for antibiotics.", "read": True, "created_at": iso(base - timedelta(days=1, hours=2))},
+            {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-3", "sender": "distributor", "message": "Sent on your email. New launch: Azithral-XL 200mg DT pack of 6 at ₹68 PTR.", "read": False, "created_at": iso(base - timedelta(days=1, hours=1, minutes=50))},
+        ]
+        await db.chat_messages.insert_many(chats)
 
 
 # ============================================================
@@ -397,8 +446,14 @@ async def dashboard(user: dict = Depends(get_current_user)):
 
     deliveries = [o for o in today_orders if o["status"] in ("placed", "processing", "shipped") and o.get("eta")]
 
-    abc = await db.distributors.find_one({"id": "dist-1"}, {"_id": 0})
-    credit_pct = round((abc["credit_used"] / abc["credit_limit"]) * 100) if abc else 0
+    # Pick the worst-utilized distributor as the credit-warning subject
+    all_dists = await db.distributors.find({}, {"_id": 0}).to_list(50)
+    worst = max(
+        all_dists,
+        key=lambda d: (d.get("credit_used", 0) / max(d.get("credit_limit", 1), 1)),
+        default=None,
+    )
+    credit_pct = round((worst["credit_used"] / worst["credit_limit"]) * 100) if worst and worst["credit_limit"] else 0
 
     return {
         "today_orders": {
@@ -426,10 +481,11 @@ async def dashboard(user: dict = Depends(get_current_user)):
         ],
         "action_required": {
             "credit_warning": {
-                "distributor": abc["short_name"] if abc else "",
+                "distributor_id": worst["id"] if worst else "",
+                "distributor": worst["short_name"] if worst else "",
                 "used_pct": credit_pct,
-                "used": abc["credit_used"] if abc else 0,
-                "limit": abc["credit_limit"] if abc else 0,
+                "used": worst["credit_used"] if worst else 0,
+                "limit": worst["credit_limit"] if worst else 0,
             },
             "backorder": {
                 "product": "Azithromycin 500mg",
@@ -1085,6 +1141,358 @@ async def search_comprehensive(q: str, user: dict = Depends(get_current_user)):
 @api_router.get("/")
 async def root():
     return {"message": "RX Tech API"}
+
+
+# ============================================================
+# LEDGER (per distributor) — bills, payments, credit/debit notes
+# ============================================================
+@api_router.get("/ledger/{distributor_id}")
+async def get_ledger(distributor_id: str, user: dict = Depends(get_current_user)):
+    """Return a complete vendor ledger: all bills (orders/invoices), payments,
+    credit notes, debit notes, with running balance.
+    """
+    dist = await db.distributors.find_one({"id": distributor_id}, {"_id": 0})
+    if not dist:
+        raise HTTPException(404, "Distributor not found")
+    # Collect bills (orders) for this user+distributor
+    orders = await db.orders.find(
+        {"user_id": user["id"], "distributor_id": distributor_id},
+        {"_id": 0},
+    ).to_list(500)
+    payments = await db.payments.find(
+        {"user_id": user["id"], "distributor_id": distributor_id},
+        {"_id": 0},
+    ).to_list(500)
+    credit_notes = await db.credit_notes.find(
+        {"user_id": user["id"], "distributor_id": distributor_id},
+        {"_id": 0},
+    ).to_list(200)
+    debit_notes = await db.debit_notes.find(
+        {"user_id": user["id"], "distributor_id": distributor_id},
+        {"_id": 0},
+    ).to_list(200)
+
+    # Build entries with proper +/- sign
+    entries = []
+    for o in orders:
+        entries.append({
+            "id": o["id"], "type": "bill", "ref": o["code"],
+            "label": f"Invoice {o['code']}",
+            "sku_count": o.get("sku_count", 0),
+            "date": o["created_at"], "debit": o["total"], "credit": 0,
+            "status": o["status"], "payment_method": o.get("payment_method", "cash"),
+        })
+    for p in payments:
+        if p["status"] == "paid":
+            entries.append({
+                "id": p["id"], "type": "payment", "ref": p["invoice_code"],
+                "label": f"Payment for {p['invoice_code']}",
+                "date": p.get("paid_at") or p["due_date"], "debit": 0, "credit": p["amount"],
+                "status": "settled",
+            })
+    for cn in credit_notes:
+        entries.append({
+            "id": cn["id"], "type": "credit_note", "ref": cn["code"],
+            "label": f"Credit Note: {cn['reason']}",
+            "date": cn["created_at"], "debit": 0, "credit": cn["amount"],
+            "status": cn.get("status", "issued"),
+        })
+    for dn in debit_notes:
+        entries.append({
+            "id": dn["id"], "type": "debit_note", "ref": dn["code"],
+            "label": f"Debit Note: {dn['reason']}",
+            "date": dn["created_at"], "debit": dn["amount"], "credit": 0,
+            "status": dn.get("status", "issued"),
+        })
+
+    entries.sort(key=lambda e: e["date"])
+    running = 0.0
+    for e in entries:
+        running += (e["debit"] - e["credit"])
+        e["running_balance"] = round(running, 2)
+
+    total_bills = sum(o["total"] for o in orders)
+    total_paid = sum(p["amount"] for p in payments if p["status"] == "paid")
+    total_due = sum(p["amount"] for p in payments if p["status"] in ("due", "overdue"))
+    total_overdue = sum(p["amount"] for p in payments if p["status"] == "overdue")
+    total_credit_notes = sum(c["amount"] for c in credit_notes)
+    total_debit_notes = sum(d["amount"] for d in debit_notes)
+    closing_balance = round(running, 2)
+    credit_available = (dist.get("credit_limit", 0) - dist.get("credit_used", 0))
+
+    return {
+        "distributor": dist,
+        "summary": {
+            "total_bills": round(total_bills, 2),
+            "total_paid": round(total_paid, 2),
+            "total_due": round(total_due, 2),
+            "total_overdue": round(total_overdue, 2),
+            "credit_notes": round(total_credit_notes, 2),
+            "debit_notes": round(total_debit_notes, 2),
+            "closing_balance": closing_balance,
+            "credit_limit": dist.get("credit_limit", 0),
+            "credit_used": dist.get("credit_used", 0),
+            "credit_available": credit_available,
+        },
+        "entries": entries,
+    }
+
+
+# ============================================================
+# CREDIT NOTES / DEBIT NOTES
+# ============================================================
+class CreditNoteReq(BaseModel):
+    distributor_id: str
+    order_id: Optional[str] = None
+    amount: float
+    reason: str  # damaged | expired | wrong-supply | return-refund | settlement | other
+    notes: Optional[str] = None
+
+
+@api_router.post("/credit-notes")
+async def create_credit_note(req: CreditNoteReq, user: dict = Depends(get_current_user)):
+    cnt = await db.credit_notes.count_documents({"user_id": user["id"]})
+    cn = {
+        "id": str(uuid.uuid4()),
+        "code": f"CN-{2400 + cnt + 1}",
+        "user_id": user["id"],
+        "distributor_id": req.distributor_id,
+        "order_id": req.order_id,
+        "amount": round(req.amount, 2),
+        "reason": req.reason,
+        "notes": req.notes,
+        "status": "issued",
+        "created_at": iso(now_utc()),
+    }
+    await db.credit_notes.insert_one({**cn})
+    # If credit note offsets credit-used, reduce it
+    if req.amount > 0:
+        await db.distributors.update_one(
+            {"id": req.distributor_id},
+            {"$inc": {"credit_used": -req.amount}},
+        )
+    return {"success": True, "item": cn}
+
+
+@api_router.get("/credit-notes")
+async def list_credit_notes(distributor_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    q = {"user_id": user["id"]}
+    if distributor_id:
+        q["distributor_id"] = distributor_id
+    items = await db.credit_notes.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return items
+
+
+class DebitNoteReq(BaseModel):
+    distributor_id: str
+    order_id: Optional[str] = None
+    amount: float
+    reason: str
+    notes: Optional[str] = None
+
+
+@api_router.post("/debit-notes")
+async def create_debit_note(req: DebitNoteReq, user: dict = Depends(get_current_user)):
+    cnt = await db.debit_notes.count_documents({"user_id": user["id"]})
+    dn = {
+        "id": str(uuid.uuid4()),
+        "code": f"DN-{2400 + cnt + 1}",
+        "user_id": user["id"],
+        "distributor_id": req.distributor_id,
+        "order_id": req.order_id,
+        "amount": round(req.amount, 2),
+        "reason": req.reason,
+        "notes": req.notes,
+        "status": "issued",
+        "created_at": iso(now_utc()),
+    }
+    await db.debit_notes.insert_one({**dn})
+    return {"success": True, "item": dn}
+
+
+@api_router.get("/debit-notes")
+async def list_debit_notes(distributor_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    q = {"user_id": user["id"]}
+    if distributor_id:
+        q["distributor_id"] = distributor_id
+    items = await db.debit_notes.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return items
+
+
+# ============================================================
+# GST INVOICE BREAKDOWN
+# ============================================================
+@api_router.get("/orders/{order_id}/invoice")
+async def get_invoice_breakdown(order_id: str, user: dict = Depends(get_current_user)):
+    """Return order with full GST breakdown (CGST + SGST or IGST) — pharma default 12% (6+6)."""
+    o = await db.orders.find_one({"id": order_id, "user_id": user["id"]}, {"_id": 0})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    dist = await db.distributors.find_one({"id": o["distributor_id"]}, {"_id": 0})
+    user_state = (user.get("state_code") or "27")  # default MH
+    dist_state = (dist.get("state_code") if dist else "27")
+    intra_state = (user_state == dist_state)
+
+    gst_pct = 12.0  # pharma standard
+    # Treat order.total as inclusive of GST? In this app we'll treat as taxable value + GST added.
+    taxable = round(o["total"] / (1 + gst_pct / 100), 2)
+    gst_amount = round(o["total"] - taxable, 2)
+    if intra_state:
+        cgst = round(gst_amount / 2, 2)
+        sgst = round(gst_amount - cgst, 2)
+        igst = 0.0
+    else:
+        cgst = 0.0
+        sgst = 0.0
+        igst = gst_amount
+
+    # Per-line breakdown
+    lines = []
+    for it in o.get("items", []):
+        line_total = it["price"] * it["qty"]
+        line_taxable = round(line_total / (1 + gst_pct / 100), 2)
+        line_gst = round(line_total - line_taxable, 2)
+        lines.append({
+            **it,
+            "line_total": round(line_total, 2),
+            "taxable": line_taxable,
+            "gst": line_gst,
+        })
+
+    return {
+        "order": o,
+        "distributor": dist,
+        "gst_pct": gst_pct,
+        "taxable_value": taxable,
+        "cgst": cgst,
+        "sgst": sgst,
+        "igst": igst,
+        "total_gst": gst_amount,
+        "round_off": 0.0,
+        "grand_total": round(o["total"], 2),
+        "intra_state": intra_state,
+        "lines": lines,
+    }
+
+
+# ============================================================
+# CHAT (per distributor)
+# ============================================================
+class ChatMsgReq(BaseModel):
+    distributor_id: str
+    message: str
+    attach_order_id: Optional[str] = None
+
+
+@api_router.get("/chat/threads")
+async def chat_threads(user: dict = Depends(get_current_user)):
+    """List all chat threads — one per distributor — with last message preview."""
+    # Pull all distributors that have any chat OR any order with this user
+    distributors = await db.distributors.find({}, {"_id": 0}).to_list(50)
+    threads = []
+    for d in distributors:
+        last = await db.chat_messages.find_one(
+            {"user_id": user["id"], "distributor_id": d["id"]},
+            {"_id": 0},
+            sort=[("created_at", -1)],
+        )
+        unread = await db.chat_messages.count_documents(
+            {"user_id": user["id"], "distributor_id": d["id"], "sender": "distributor", "read": False}
+        )
+        if last:
+            threads.append({
+                "distributor": {"id": d["id"], "short_name": d["short_name"], "rating": d.get("rating")},
+                "last_message": last,
+                "unread": unread,
+            })
+    # Sort by last message date
+    threads.sort(key=lambda t: t["last_message"]["created_at"], reverse=True)
+    return threads
+
+
+@api_router.get("/chat/{distributor_id}")
+async def chat_history(distributor_id: str, user: dict = Depends(get_current_user)):
+    d = await db.distributors.find_one({"id": distributor_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Distributor not found")
+    msgs = await db.chat_messages.find(
+        {"user_id": user["id"], "distributor_id": distributor_id},
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(500)
+    # mark distributor messages read
+    await db.chat_messages.update_many(
+        {"user_id": user["id"], "distributor_id": distributor_id, "sender": "distributor", "read": False},
+        {"$set": {"read": True}},
+    )
+    return {"distributor": d, "messages": msgs}
+
+
+@api_router.post("/chat")
+async def send_chat(req: ChatMsgReq, user: dict = Depends(get_current_user)):
+    msg = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "distributor_id": req.distributor_id,
+        "sender": "user",
+        "message": req.message.strip(),
+        "attach_order_id": req.attach_order_id,
+        "read": True,
+        "created_at": iso(now_utc()),
+    }
+    await db.chat_messages.insert_one({**msg})
+    # Auto-reply stub from distributor side (after small delay simulated via created_at offset)
+    auto = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "distributor_id": req.distributor_id,
+        "sender": "distributor",
+        "message": _chat_auto_reply(req.message, req.attach_order_id),
+        "read": False,
+        "created_at": iso(now_utc() + timedelta(seconds=2)),
+    }
+    await db.chat_messages.insert_one({**auto})
+    return {"success": True, "messages": [msg, auto]}
+
+
+def _chat_auto_reply(text: str, order_id: Optional[str]) -> str:
+    t = text.lower()
+    if "delivery" in t or "eta" in t or "when" in t:
+        return "Hi! Your order is being prepared. Expected ETA today by 6 PM. Track in Orders tab."
+    if "discount" in t or "scheme" in t or "offer" in t:
+        return "We're running a 10+1 scheme on Pantoprazole and 5% extra discount on bulk orders >₹10K this week."
+    if "credit" in t or "limit" in t:
+        return "Sure — we'll review your credit limit next billing cycle. Send us your last 3 months' purchases on email."
+    if "return" in t or "damaged" in t or "expired" in t:
+        return "Apologies — please raise a return request and we'll issue a credit note within 48 hrs."
+    if order_id:
+        return f"Thanks! I've pulled up that order. Our team will reply shortly with details."
+    return "Hi! Thanks for reaching out — our sales rep will respond shortly. For urgent issues call +91-22-XXXX-XXXX."
+
+
+# ============================================================
+# DISTRIBUTOR PORTAL STUB (to be expanded later)
+# ============================================================
+@api_router.get("/distributor-portal/dashboard")
+async def distributor_dashboard(distributor_id: str = "dist-1"):
+    """Placeholder dashboard for distributor side — to be built out later.
+
+    Returns counts of orders received, total revenue, pending payments etc.
+    For now, no auth (will require distributor-role JWT in v2).
+    """
+    orders = await db.orders.find({"distributor_id": distributor_id}, {"_id": 0}).to_list(500)
+    payments = await db.payments.find({"distributor_id": distributor_id}, {"_id": 0}).to_list(500)
+    received_orders = len(orders)
+    revenue = sum(o["total"] for o in orders)
+    pending_payment = sum(p["amount"] for p in payments if p["status"] in ("due", "overdue"))
+    return {
+        "received_orders": received_orders,
+        "revenue": round(revenue, 2),
+        "pending_payment": round(pending_payment, 2),
+        "active_buyers": len({o["user_id"] for o in orders}),
+    }
+
+
+
 
 
 @api_router.get("/health")
