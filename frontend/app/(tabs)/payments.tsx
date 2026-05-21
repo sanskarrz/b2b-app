@@ -14,6 +14,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { TopBar } from "@/src/components/TopBar";
 import { api } from "@/src/api";
 import { colors, radius, formatINRFull } from "@/src/theme";
+import { confirm } from "@/src/components/confirm";
 
 const TABS = [
   { key: "all", label: "All" },
@@ -47,7 +48,7 @@ export default function Payments() {
   );
 
   const pay = (id: string) => {
-    Alert.alert("Pay Invoice", "Proceed to UPI payment?", [
+    confirm("Pay Invoice", "Proceed to UPI payment?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Pay Now",

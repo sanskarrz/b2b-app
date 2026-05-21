@@ -13,6 +13,7 @@ import { useRouter } from "expo-router";
 import { TopBar } from "@/src/components/TopBar";
 import { api, clearToken } from "@/src/api";
 import { colors, radius } from "@/src/theme";
+import { confirm } from "@/src/components/confirm";
 
 type ItemDef = {
   icon: any;
@@ -33,7 +34,7 @@ export default function More() {
   }, []);
 
   const onLogout = () => {
-    Alert.alert("Log out?", "You will need to sign in again with OTP.", [
+    confirm("Log out?", "You will need to sign in again with OTP.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Log out",
