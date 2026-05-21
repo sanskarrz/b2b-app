@@ -425,9 +425,7 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Modernized Home screen with gradient hero + polished backorder/credit cards"
-    - "Cart screen with per-distributor payment method (Cash vs Credit Line)"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -457,7 +455,25 @@ agent_communication:
       No 4xx/5xx encountered. All new endpoints are working as specified.
   - agent: "testing"
     message: |
-      Re-ran /app/backend_test.py (now 35 tests) against the public preview URL. **35/35 PASSED. No 4xx/5xx. No missing keys.** Newly added tests for this session:
+      Frontend E2E run (Playwright, iPhone-12 viewport 390x844) against public preview URL. **All 9 sections PASS.** No crashes, no red-screen routes, no console errors (only minor RN warnings: "Unexpected text node" + "props.pointerEvents deprecated" — non-blocking, not user-visible).
+
+      LOGIN: demo@rxtech.com → Continue → dev-OTP read from screen → 6 boxes via input nth(1..6) → "Verify & Continue" (clicked by exact text) → landed on "Good afternoon, Demo 👋" home. ✅
+
+      A) HOME — Gradient hero greeting, shop pill "RX Demo Medical Stores", Search bar, Quick Actions (Scan Rx/Bulk/Shortbook/Returns), KPI cards, AI Insights, Smart Tools 6-grid (Reorder/Compare/Margin/Calc/Templates/Cash Flow), Action Required (Credit warning + Backorder w/ Keep Waiting + Switch Distributor) — all present. ✅
+      B) DISTRIBUTOR /distributor/dist-1 — ABC Pharma hero with ⭐4.7 • Mumbai • Today 6 PM, 4 action pills (Chat/Ledger/Call/WhatsApp), Your Business (Spent/Orders/Unpaid/Last Order), Credit Line (used 1,82,653 / 2,00,000 • 21d • 1.5% settle • Min ₹2000), Contact Details (Phone/WhatsApp/Email/Address/Hours), Recent Orders. ✅ Screenshot attached shows full UI.
+      C) LEDGER /ledger/dist-1 — Closing Balance hero ₹21,990 with Pay / Credit Note / Chat buttons. 6-tile summary (Bills/Paid/Due/Overdue/CN/DN). Credit Line card with usage bar. Filter chips All(9)/Bills(1)/Payments(1)/CN(5)/DN(2). **"Credit Note" button in hero — VERIFIED FIXED: navigates to /credit-note/new?distributor_id=dist-1.** ✅
+      D) CART OPTIMIZER — /search 'paracetamol' returns results. /cart shows green gradient "Optimize (Save ₹)" button, outlined "Templates" button, "Smart Savings (2)" yellow banner with swap suggestions (Azee 500 → Zady 500 save ₹18, Azithral 500 → Zady 500 save ₹82), per-distributor groups with Cash/Credit toggle and "Place order" buttons, bottom "Place ALL ₹782". ✅
+      E) CASH FLOW /cash-flow — "Due this week" gradient hero + 3 stat cards + 30-day heatmap + Upcoming payments list. ✅
+      F) PAYMENTS /payments — 4-tile accounting grid (This Week/Credit Taken/Paid 30d/On Hold), Vendor Ledger carousel, filter chips (All/Due/Overdue/Paid), invoice list. ✅
+      G) COMPARE/CALCULATOR/MARGIN ANALYZER — /compare shows ABC vs Medline table; /calculator has MRP+PTR inputs with live margin; /analytics/margin shows total profit + category bars. ✅
+      H) CHAT — /chat shows ABC Pharma + XYZ Pharma threads with unread badges, "Other distributors" carousel (Medline/HealthFirst/Sun Wholesale). /chat/dist-1 opens 1-on-1 thread with Type+Send + topbar Call/WhatsApp/Ledger icons. ✅
+      I) MORE — Smart Tools 4/4 (Calculator/Compare/Margin/Reorder) + Operations 6/6 (Messages/Cash Flow/Templates/Favourites/CN-DN/Shortbook/Returns/Bulk Order) all present. ✅
+
+      Backend API observed via supervisor logs during run: /dashboard, /cart, /distributors/dist-1, /ledger/dist-1, /search/comprehensive, /cart/substitutes, /payments, /payments/summary, /distributors/compare/dist-1/dist-2, /analytics/margin-by-category, /chat/threads, /chat/dist-1, /auth/me — all returned 200 OK.
+
+      Minor (not blocking): console warning "Unexpected text node: . A text node cannot be a child of a <View>" appears on a couple of screens — main agent may want to find the stray empty-string `{value && ...}` short-circuit later. No functional impact.
+
+      **VERDICT: All test scenarios A through I PASS. The earlier-reported Ledger → Credit Note navigation bug is confirmed FIXED.**
       1. GET /api/distributors/dist-1 (rich) — returns {distributor, contact, products, stats, recent_orders, last_chat}. contact has phone/whatsapp/email/address/working_hours and a sales_rep object with name/phone/designation. stats has total_spent/order_count/unpaid/last_order_date. recent_orders is an array (1 item, ≤5). last_chat is a dict (demo seeded). products=196. ✅
       2. GET /api/distributors/compare/dist-1/dist-2 — returns {a, b} each containing product_count and user_stats {total_spent, order_count, unpaid}. a.products=196, b.products=260. ✅
       3. GET /api/analytics/margin-by-category — returns {rows: [{category, spend, profit, margin_pct, items}], total_spend, total_profit}. 1 row aggregated, total_spend=8751.0, total_profit=2967.79. ✅
