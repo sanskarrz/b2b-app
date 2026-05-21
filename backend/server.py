@@ -32,7 +32,7 @@ JWT_ALG = "HS256"
 JWT_EXPIRES_DAYS = 30
 OTP_TTL_MINUTES = 10
 # DEV mode: return OTP in API response (no SMTP configured)
-DEV_RETURN_OTP = True
+DEV_RETURN_OTP = os.environ.get("DEV_RETURN_OTP", "true").lower() == "true"
 
 # ---------- App ----------
 app = FastAPI(title="RX Tech API")
