@@ -278,6 +278,90 @@
         agent: "main"
         comment: "Chat thread topbar now has 3 icons: ledger (receipt), call (tel: link), WhatsApp (wa.me link with pre-filled greeting)."
 
+  - task: "Rich Distributor Profile (contact + chat + ledger + order history + products)"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/distributor/[id].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Rewrote distributor profile with gradient hero (avatar + name + ⭐rating • location • delivery), Chat/Ledger/Call/WhatsApp action pills. Your Business stats (Total Spent / Orders / Unpaid / Last Order). Credit Line card with terms pills (credit days, early settle %, min order). Contact Details (Phone/WhatsApp/Email/Address/Hours — all tappable for tel:/mailto:/wa.me). Sales Representative card. Latest message preview. Recent Orders (last 5). Horizontal product carousel. Specializes-in chips. Top-bar has Compare icon."
+
+  - task: "Distributor Compare A vs B"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/compare.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Side-by-side compare of 2 distributors. Rating, delivery, location, credit days, settle %, min order, credit limit, discount, products + Your Business section (orders/spent/unpaid). Better values are auto-highlighted green. Modal pickers to swap either side. Linked from /distributor/[id] and More menu."
+
+  - task: "Margin Calculator (PTR ↔ MRP ↔ Margin)"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/calculator.tsx"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Inputs: MRP, PTR, GST%, Qty. Live results: Margin%, Profit/unit, GST on PTR, Cost incl. GST, Total cost/sell/profit. Margin tier color-coded (green/amber/red). Pharma tip box at bottom."
+
+  - task: "Margin Analyzer by Category"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/analytics/margin.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Backend /api/analytics/margin-by-category aggregates delivered/shipped/processing orders by product category showing spend, profit, margin%, items. Frontend: green gradient hero with total profit, ranked bar chart per category with tier badges (high/mid/low margin), insight tip."
+
+  - task: "Smart Reorder Predictor"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/reorder-predictor.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Backend /api/analytics/reorder-predictor analyzes order history per SKU, computes monthly cycle from past order dates, returns suggestions where urgency (days_since/cycle) ≥ 0.7. Frontend cards show urgency pill (color by urgency), suggested qty, total value, one-tap Add-to-Cart."
+
+  - task: "Home screen — Smart Tools section (replaces Profit Opportunities)"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/(tabs)/home.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Removed 'Profit Opportunities' section (less actionable). Added 'Smart Tools' 6-tile grid: Smart Reorder, Compare, Margin Analyzer, Margin Calc, Templates, Cash Flow — each with colored icon + label + sub. Cleaner, more useful home."
+
+  - task: "More tab — Smart Tools section"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/(tabs)/more.tsx"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added 'Smart Tools' section with Margin Calculator, Compare Distributors, Margin Analyzer, Smart Reorder Predictor."
+
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
