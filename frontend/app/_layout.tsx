@@ -19,6 +19,9 @@ export default function RootLayout() {
         <Stack.Screen name="distributor/[id]" options={{ animation: "slide_from_right" }} />
         <Stack.Screen name="returns" options={{ animation: "slide_from_right" }} />
         <Stack.Screen name="shortbook" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="bulk-order" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="invoice/[id]" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="report-issue" options={{ animation: "slide_from_bottom", presentation: "modal" }} />
       </Stack>
     </SafeAreaProvider>
   );

@@ -52,10 +52,11 @@ export default function Cart() {
     load();
   };
 
-  const placeOrder = async () => {
+  const placeOrder = async (distributorId?: string) => {
     setPlacing(true);
     try {
-      const res: any = await api("/orders", { method: "POST" });
+      const path = distributorId ? `/orders?distributor_id=${distributorId}` : "/orders";
+      const res: any = await api(path, { method: "POST" });
       Alert.alert(
         "Order placed!",
         `${res.orders.length} order(s) placed successfully.`,
@@ -63,6 +64,11 @@ export default function Cart() {
           {
             text: "View Orders",
             onPress: () => router.replace("/(tabs)/orders"),
+          },
+          {
+            text: "Continue shopping",
+            style: "cancel",
+            onPress: () => load(),
           },
         ]
       );
@@ -159,6 +165,17 @@ export default function Cart() {
                   </View>
                 </View>
               ))}
+              <TouchableOpacity
+                style={styles.placeForDist}
+                onPress={() => placeOrder(did)}
+                disabled={placing}
+                testID={`place-for-${did}`}
+              >
+                <Ionicons name="checkmark-circle" size={16} color="#FFF" />
+                <Text style={styles.placeForDistText}>
+                  Place order with {dist.short_name} • {formatINRFull(subtotal)}
+                </Text>
+              </TouchableOpacity>
             </View>
           );
         })}
@@ -182,10 +199,10 @@ export default function Cart() {
 
       <View style={styles.bottomBar}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.bbLabel}>Total Payable</Text>
+          <Text style={styles.bbLabel}>Total ({Object.keys(byDist).length} distributors)</Text>
           <Text style={styles.bbValue}>{formatINRFull(cart.total)}</Text>
         </View>
-        <Button title="Place Order" onPress={placeOrder} loading={placing} testID="place-order-btn" />
+        <Button title="Place ALL Orders" onPress={() => placeOrder()} loading={placing} testID="place-order-btn" />
       </View>
     </SafeAreaView>
   );
@@ -221,6 +238,17 @@ const styles = StyleSheet.create({
   qtyBox: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 10 },
   qtyBtn: { width: 28, height: 30, alignItems: "center", justifyContent: "center" },
   qty: { width: 28, textAlign: "center", fontWeight: "800", fontSize: 13 },
+  placeForDist: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    margin: 10,
+    borderRadius: 10,
+  },
+  placeForDistText: { color: "#FFF", fontWeight: "800", fontSize: 13 },
   bill: { padding: 14, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, marginTop: 4 },
   billTitle: { fontWeight: "800", fontSize: 14, color: colors.text, marginBottom: 10 },
   billRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 4 },

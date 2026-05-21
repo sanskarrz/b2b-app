@@ -52,7 +52,7 @@ export default function More() {
       items: [
         { icon: "list-outline", label: "Shortbook (Auto-reorder)", onPress: () => router.push("/shortbook"), testID: "more-shortbook" },
         { icon: "return-up-back-outline", label: "Returns & Refunds", onPress: () => router.push("/returns"), testID: "more-returns" },
-        { icon: "cube-outline", label: "Bulk Order", onPress: () => router.push("/search"), testID: "more-bulk" },
+        { icon: "cube-outline", label: "Bulk Order", onPress: () => router.push("/bulk-order"), testID: "more-bulk" },
       ],
     },
     {
@@ -67,6 +67,7 @@ export default function More() {
       title: "Account",
       items: [
         { icon: "person-outline", label: "Profile & Shop Info", onPress: () => Alert.alert("Coming soon") },
+        { icon: "flag-outline", label: "Report a problem", onPress: () => router.push("/report-issue"), testID: "more-report" },
         { icon: "notifications-outline", label: "Notifications", onPress: () => Alert.alert("Coming soon") },
         { icon: "help-circle-outline", label: "Help & Support", onPress: () => Alert.alert("Coming soon") },
       ],

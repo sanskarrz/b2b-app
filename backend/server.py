@@ -244,7 +244,10 @@ async def seed_user_data(user_id: str):
         {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-1", "distributor_name": "ABC Pharma", "invoice_code": "INV-12934", "amount": 42300.00, "due_date": iso(base + timedelta(hours=4)), "status": "due", "days_to_due": 0},
         {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-3", "distributor_name": "XYZ Pharma", "invoice_code": "INV-12891", "amount": 18650.00, "due_date": iso(base + timedelta(days=3)), "status": "due", "days_to_due": 3},
         {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-2", "distributor_name": "Medline Distr.", "invoice_code": "INV-12702", "amount": 9250.00, "due_date": iso(base - timedelta(days=2)), "status": "overdue", "days_to_due": -2},
-        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "invoice_code": "INV-12660", "amount": 14750.00, "due_date": iso(base - timedelta(days=10)), "status": "paid", "days_to_due": -10},
+        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "invoice_code": "INV-12660", "amount": 14750.00, "due_date": iso(base - timedelta(days=10)), "status": "paid", "days_to_due": -10, "paid_at": iso(base - timedelta(days=8))},
+        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-1", "distributor_name": "ABC Pharma", "invoice_code": "INV-12598", "amount": 28400.00, "due_date": iso(base - timedelta(days=15)), "status": "paid", "days_to_due": -15, "paid_at": iso(base - timedelta(days=14))},
+        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-3", "distributor_name": "XYZ Pharma", "invoice_code": "INV-12511", "amount": 11200.00, "due_date": iso(base - timedelta(days=20)), "status": "paid", "days_to_due": -20, "paid_at": iso(base - timedelta(days=18))},
+        {"id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": "dist-2", "distributor_name": "Medline Distr.", "invoice_code": "INV-12440", "amount": 7850.00, "due_date": iso(base - timedelta(days=25)), "status": "paid", "days_to_due": -25, "paid_at": iso(base - timedelta(days=22))},
     ]
     await db.payments.insert_many(payments)
 
@@ -436,7 +439,7 @@ async def get_distributor(dist_id: str):
 
 
 @api_router.get("/products")
-async def list_products(q: Optional[str] = None, category: Optional[str] = None, limit: int = 50):
+async def list_products(q: Optional[str] = None, category: Optional[str] = None, distributor_id: Optional[str] = None, limit: int = 50):
     query = {}
     if q:
         query["$or"] = [
@@ -446,6 +449,8 @@ async def list_products(q: Optional[str] = None, category: Optional[str] = None,
         ]
     if category:
         query["category"] = category
+    if distributor_id:
+        query["distributor_ids"] = distributor_id
     items = await db.products.find(query, {"_id": 0}).to_list(limit)
     return items
 
@@ -539,8 +544,11 @@ async def clear_cart(user: dict = Depends(get_current_user)):
 # ORDERS
 # ============================================================
 @api_router.post("/orders")
-async def place_order(user: dict = Depends(get_current_user)):
-    cart = await db.cart.find({"user_id": user["id"]}, {"_id": 0}).to_list(100)
+async def place_order(distributor_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    query = {"user_id": user["id"]}
+    if distributor_id:
+        query["distributor_id"] = distributor_id
+    cart = await db.cart.find(query, {"_id": 0}).to_list(100)
     if not cart:
         raise HTTPException(400, "Cart is empty")
 
@@ -579,8 +587,11 @@ async def place_order(user: dict = Depends(get_current_user)):
         orders_created.append(order)
         code_suffix += 1
 
-    # Clear cart
-    await db.cart.delete_many({"user_id": user["id"]})
+    # Clear cart (only the placed items)
+    if distributor_id:
+        await db.cart.delete_many({"user_id": user["id"], "distributor_id": distributor_id})
+    else:
+        await db.cart.delete_many({"user_id": user["id"]})
     return {"success": True, "orders": orders_created}
 
 
@@ -619,9 +630,49 @@ async def list_payments(status: Optional[str] = None, user: dict = Depends(get_c
 async def pay_invoice(pid: str, user: dict = Depends(get_current_user)):
     await db.payments.update_one(
         {"id": pid, "user_id": user["id"]},
-        {"$set": {"status": "paid"}},
+        {"$set": {"status": "paid", "paid_at": iso(now_utc())}},
     )
     return {"success": True}
+
+
+@api_router.get("/payments/{pid}")
+async def get_payment(pid: str, user: dict = Depends(get_current_user)):
+    p = await db.payments.find_one({"id": pid, "user_id": user["id"]}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Invoice not found")
+    return p
+
+
+# ============================================================
+# ISSUES / REPORT PROBLEM
+# ============================================================
+class IssueReq(BaseModel):
+    type: str  # invoice | order | delivery | other
+    reference_id: Optional[str] = None
+    reference_label: Optional[str] = None
+    message: str
+
+
+@api_router.post("/issues")
+async def report_issue(req: IssueReq, user: dict = Depends(get_current_user)):
+    item = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "type": req.type,
+        "reference_id": req.reference_id,
+        "reference_label": req.reference_label,
+        "message": req.message.strip(),
+        "status": "open",
+        "created_at": iso(now_utc()),
+    }
+    await db.issues.insert_one({**item})
+    return {"success": True, "item": item}
+
+
+@api_router.get("/issues")
+async def list_issues(user: dict = Depends(get_current_user)):
+    items = await db.issues.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return items
 
 
 # ============================================================

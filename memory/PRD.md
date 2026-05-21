@@ -32,21 +32,25 @@ Designs sourced from user's Figma "Medical Order App" page (file: Recovery-Call-
 - `/(tabs)/more` Profile, operations menu (shortbook, returns, bulk order), reports, account, logout
 
 **Detail screens**
-- `/search` Full search with recent searches, quick filters, results
+- `/search` Full search with recent searches, quick filters, **distributor filter row** (filter products by vendor), results
 - `/product/[id]` Product detail – price, MRP, margin, scheme, distributor selection, find substitutes, qty controls, add to cart
-- `/cart` Cart grouped by distributor with line items, bill summary, place order
+- `/cart` Cart grouped by distributor with line items, bill summary, **place per-distributor OR all-at-once**
 - `/order/[id]` Order detail with 4-step status tracker
 - `/distributor/[id]` Distributor profile, credit limit usage, product catalog
 - `/returns` Returns list with status pills
 - `/shortbook` AI-suggested reorders, individual or bulk add to cart
+- `/bulk-order` **NEW** Bulk-order single product: search → pick SKU → bulk qty (with 50/100/200/500 presets) → compare distributors → one-tap add
+- `/invoice/[id]` **NEW** Full invoice detail – amount, due/paid status with paid date, breakdown, share, **Report Problem** button, Pay Now
+- `/report-issue` **NEW** Report a problem (invoice / order / delivery / other) with linked reference
 
 ## Backend API
 **Auth**: `POST /api/auth/send-otp`, `POST /api/auth/verify-otp`, `POST /api/auth/onboard`, `GET /api/auth/me`
 **Dashboard**: `GET /api/dashboard`
-**Catalog**: `GET /api/products`, `GET /api/products/{id}`, `GET /api/distributors`, `GET /api/distributors/{id}`
+**Catalog**: `GET /api/products` (supports `?q=`, `?category=`, `?distributor_id=`), `GET /api/products/{id}`, `GET /api/distributors`, `GET /api/distributors/{id}`
 **Cart**: `GET /api/cart`, `POST /api/cart/items`, `PATCH /api/cart/items/{id}`, `DELETE /api/cart/items/{id}`, `DELETE /api/cart`
-**Orders**: `POST /api/orders` (place), `GET /api/orders`, `GET /api/orders/{id}`
-**Payments**: `GET /api/payments`, `POST /api/payments/{id}/pay`
+**Orders**: `POST /api/orders` (supports `?distributor_id=` to place per-vendor), `GET /api/orders`, `GET /api/orders/{id}`
+**Payments**: `GET /api/payments`, `GET /api/payments/{id}` (invoice detail), `POST /api/payments/{id}/pay` (sets `paid_at`)
+**Issues**: `POST /api/issues`, `GET /api/issues`
 **Returns**: `GET /api/returns`, `POST /api/returns`
 **Shortbook**: `GET /api/shortbook`, `POST /api/shortbook/{id}/order`
 

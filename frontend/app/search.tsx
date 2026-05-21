@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from "react-native";
 import { useEffect, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -22,12 +23,18 @@ const QUICK_FILTERS = ["Antibiotic", "Analgesic", "Diabetes", "Cardiac", "Gastri
 export default function Search() {
   const router = useRouter();
   const [q, setQ] = useState("");
+  const [distributors, setDistributors] = useState<any[]>([]);
+  const [distFilter, setDistFilter] = useState<string | null>(null);
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
   useEffect(() => {
-    if (!q.trim()) {
+    api("/distributors").then(setDistributors).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!q.trim() && !distFilter) {
       setResults([]);
       setSearched(false);
       return;
@@ -36,14 +43,19 @@ export default function Search() {
     setSearched(true);
     const t = setTimeout(async () => {
       try {
-        const data = await api(`/products?q=${encodeURIComponent(q)}`);
+        const params = new URLSearchParams();
+        if (q.trim()) params.set("q", q.trim());
+        if (distFilter) params.set("distributor_id", distFilter);
+        const data = await api(`/products?${params.toString()}`);
         setResults(data);
       } finally {
         setLoading(false);
       }
     }, 250);
     return () => clearTimeout(t);
-  }, [q]);
+  }, [q, distFilter]);
+
+  const activeDistName = distFilter ? distributors.find((d) => d.id === distFilter)?.short_name : null;
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -71,8 +83,34 @@ export default function Search() {
           </View>
         </View>
 
+        {/* Distributor filter row */}
+        <View style={styles.distFilterRow}>
+          <Text style={styles.distFilterLabel}>From:</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+            <TouchableOpacity
+              style={[styles.dPill, !distFilter && styles.dPillActive]}
+              onPress={() => setDistFilter(null)}
+              testID="dist-filter-all"
+            >
+              <Text style={[styles.dPillText, !distFilter && styles.dPillTextActive]}>All vendors</Text>
+            </TouchableOpacity>
+            {distributors.map((d) => (
+              <TouchableOpacity
+                key={d.id}
+                style={[styles.dPill, distFilter === d.id && styles.dPillActive]}
+                onPress={() => setDistFilter(d.id)}
+                testID={`dist-filter-${d.id}`}
+              >
+                <Text style={[styles.dPillText, distFilter === d.id && styles.dPillTextActive]}>
+                  {d.short_name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+
         {!searched ? (
-          <View style={{ padding: 16 }}>
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
             <Text style={styles.sectionLabel}>Recent searches</Text>
             <View style={styles.chipRow}>
               {RECENT.map((r, i) => (
@@ -90,18 +128,29 @@ export default function Search() {
                 </TouchableOpacity>
               ))}
             </View>
-          </View>
+          </ScrollView>
         ) : loading ? (
-          <ActivityIndicator color={colors.text} style={{ marginTop: 40 }} />
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
         ) : results.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="search" size={32} color={colors.textTertiary} />
-            <Text style={styles.emptyText}>No products found for &quot;{q}&quot;</Text>
+            <Text style={styles.emptyText}>
+              No products found{q ? ` for "${q}"` : ""}{activeDistName ? ` from ${activeDistName}` : ""}
+            </Text>
           </View>
         ) : (
           <FlatList
             data={results}
             keyExtractor={(i) => i.id}
+            ListHeaderComponent={
+              activeDistName ? (
+                <Text style={styles.resultHint}>
+                  {results.length} products • from {activeDistName}
+                </Text>
+              ) : (
+                <Text style={styles.resultHint}>{results.length} products found</Text>
+              )
+            }
             contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
             renderItem={({ item }) => (
               <TouchableOpacity
@@ -168,6 +217,28 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   input: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 0 },
+  distFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.bg,
+  },
+  distFilterLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: "700" },
+  dPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  dPillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  dPillText: { fontSize: 11, fontWeight: "600", color: colors.text },
+  dPillTextActive: { color: "#FFF" },
   sectionLabel: { fontSize: 12, color: colors.textSecondary, fontWeight: "700", marginBottom: 10, letterSpacing: 0.5 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
@@ -182,6 +253,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   chipText: { color: colors.text, fontSize: 12, fontWeight: "600" },
+  resultHint: { fontSize: 11, color: colors.textSecondary, fontWeight: "600", marginBottom: 10 },
   card: {
     flexDirection: "row",
     padding: 12,
@@ -210,6 +282,6 @@ const styles = StyleSheet.create({
   schemeText: { fontSize: 10, color: "#92400E", fontWeight: "700" },
   marginBadge: { backgroundColor: "#DCFCE7", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   marginText: { fontSize: 10, color: "#15803D", fontWeight: "700" },
-  empty: { alignItems: "center", marginTop: 60, gap: 10 },
-  emptyText: { color: colors.textSecondary, fontSize: 13 },
+  empty: { alignItems: "center", marginTop: 60, gap: 10, paddingHorizontal: 24 },
+  emptyText: { color: colors.textSecondary, fontSize: 13, textAlign: "center" },
 });

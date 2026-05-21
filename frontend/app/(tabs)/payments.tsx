@@ -10,7 +10,7 @@ import {
 import { useEffect, useState, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { TopBar } from "@/src/components/TopBar";
 import { api } from "@/src/api";
 import { colors, radius, formatINRFull } from "@/src/theme";
@@ -23,6 +23,7 @@ const TABS = [
 ];
 
 export default function Payments() {
+  const router = useRouter();
   const [tab, setTab] = useState("all");
   const [items, setItems] = useState<any[]>([]);
   const [summary, setSummary] = useState({ total_due: 0, total_overdue: 0 });
@@ -101,7 +102,11 @@ export default function Payments() {
             const overdue = item.status === "overdue";
             const paid = item.status === "paid";
             return (
-              <View style={styles.card}>
+              <TouchableOpacity
+                style={styles.card}
+                onPress={() => router.push(`/invoice/${item.id}`)}
+                testID={`invoice-${item.id}`}
+              >
                 <View style={{ flex: 1 }}>
                   <Text style={styles.invCode}>{item.invoice_code}</Text>
                   <Text style={styles.distName}>{item.distributor_name}</Text>
@@ -109,10 +114,10 @@ export default function Payments() {
                     {paid
                       ? "Paid"
                       : overdue
-                      ? `Overdue by ${Math.abs(item.days_to_due)}d`
+                      ? `Overdue by ${Math.abs(item.days_to_due)} days`
                       : item.days_to_due === 0
                       ? "Due today"
-                      : `Due in ${item.days_to_due}d`}
+                      : `Pending ${item.days_to_due} days`}
                   </Text>
                 </View>
                 <View style={{ alignItems: "flex-end" }}>
@@ -120,7 +125,7 @@ export default function Payments() {
                   {!paid && (
                     <TouchableOpacity
                       style={[styles.payBtn, overdue && { backgroundColor: colors.danger }]}
-                      onPress={() => pay(item.id)}
+                      onPress={(e) => { e.stopPropagation?.(); pay(item.id); }}
                       testID={`pay-${item.id}`}
                     >
                       <Text style={styles.payBtnText}>Pay</Text>
@@ -133,7 +138,7 @@ export default function Payments() {
                     </View>
                   )}
                 </View>
-              </View>
+              </TouchableOpacity>
             );
           }}
         />

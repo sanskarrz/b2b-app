@@ -59,6 +59,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container} edges={["top"]}>
       <TopBar
         rightIcons={[
+          { name: "flag-outline", onPress: () => router.push("/report-issue"), testID: "home-report" },
           { name: "notifications-outline", onPress: () => {}, testID: "home-notif", badge: 3 },
           {
             name: "cart-outline",
