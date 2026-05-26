@@ -284,10 +284,10 @@ async def seed_user_data(user_id: str):
 
     if await db.orders.count_documents({"user_id": user_id}) == 0:
         orders = [
-            {"id": str(uuid.uuid4()), "code": "ORD-2340", "user_id": user_id, "items": [{"product_id": "p-1", "name": "Azithromycin 500mg", "qty": 30, "price": 54.20}, {"product_id": "p-2", "name": "Paracetamol 650mg", "qty": 50, "price": 32.50}, {"product_id": "p-6", "name": "Cetirizine 10mg", "qty": 40, "price": 22.40}], "distributor_id": "dist-3", "distributor_name": "XYZ Pharma", "sku_count": 3, "total": 12450.00, "status": "placed", "created_at": iso(base - timedelta(hours=3)), "eta": iso(base + timedelta(hours=4))},
-            {"id": str(uuid.uuid4()), "code": "ORD-2341", "user_id": user_id, "items": [{"product_id": "p-4", "name": "Amlodipine 5mg", "qty": 20, "price": 40.80}, {"product_id": "p-7", "name": "Atorvastatin 10mg", "qty": 25, "price": 78.00}], "distributor_id": "dist-1", "distributor_name": "ABC Pharma", "sku_count": 2, "total": 8650.00, "status": "processing", "created_at": iso(base - timedelta(hours=6)), "eta": iso(base + timedelta(hours=2))},
-            {"id": str(uuid.uuid4()), "code": "ORD-2342", "user_id": user_id, "items": [{"product_id": "p-5", "name": "Pantoprazole 40mg", "qty": 30, "price": 89.50}], "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "sku_count": 1, "total": 6450.00, "status": "shipped", "created_at": iso(base - timedelta(hours=8)), "eta": iso(base + timedelta(hours=1))},
-            {"id": str(uuid.uuid4()), "code": "ORD-2338", "user_id": user_id, "items": [{"product_id": "p-9", "name": "Amoxicillin 500mg", "qty": 50, "price": 66.00}], "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "sku_count": 4, "total": 14750.00, "status": "delivered", "created_at": iso(base - timedelta(days=1)), "eta": None},
+            {"id": str(uuid.uuid4()), "code": "ORD-2340", "invoice_number": f"F0{datetime.now().strftime('%m%y')}-A{random.randint(1000000, 9999999)}", "user_id": user_id, "items": [{"product_id": "p-1", "name": "Azithromycin 500mg", "qty_ordered": 30, "qty": 30, "free_qty": 0, "price": 54.20, "mrp": 78.50, "discount_pct": 4.0, "gst_pct": 12.0, "batch": f"B{random.randint(1000, 9999)}A", "expiry": "Jun 2027"}, {"product_id": "p-2", "name": "Paracetamol 650mg", "qty_ordered": 50, "qty": 50, "free_qty": 5, "price": 32.50, "mrp": 45.00, "discount_pct": 4.0, "gst_pct": 12.0, "batch": f"B{random.randint(1000, 9999)}B", "expiry": "Sep 2027"}, {"product_id": "p-6", "name": "Cetirizine 10mg", "qty_ordered": 40, "qty": 40, "free_qty": 0, "price": 22.40, "mrp": 32.00, "discount_pct": 4.0, "gst_pct": 12.0, "batch": f"B{random.randint(1000, 9999)}C", "expiry": "Dec 2026"}], "distributor_id": "dist-3", "distributor_name": "XYZ Pharma", "sku_count": 3, "total": 12450.00, "status": "placed", "payment_method": "credit", "created_at": iso(base - timedelta(hours=3)), "eta": iso(base + timedelta(hours=4)), "delivery_confirmed": False, "has_bill_pdf": True, "amount_paid_on_delivery": 0, "amount_on_credit": 12450.00},
+            {"id": str(uuid.uuid4()), "code": "ORD-2341", "invoice_number": f"F0{datetime.now().strftime('%m%y')}-A{random.randint(1000000, 9999999)}", "user_id": user_id, "items": [{"product_id": "p-4", "name": "Amlodipine 5mg", "qty_ordered": 20, "qty": 20, "free_qty": 0, "price": 40.80, "mrp": 56.00, "discount_pct": 4.0, "gst_pct": 12.0, "batch": f"B{random.randint(1000, 9999)}D", "expiry": "Aug 2027"}, {"product_id": "p-7", "name": "Atorvastatin 10mg", "qty_ordered": 25, "qty": 25, "free_qty": 2, "price": 78.00, "mrp": 110.00, "discount_pct": 4.0, "gst_pct": 12.0, "batch": f"B{random.randint(1000, 9999)}E", "expiry": "Oct 2027"}], "distributor_id": "dist-1", "distributor_name": "ABC Pharma", "sku_count": 2, "total": 8650.00, "status": "shipped", "payment_method": "credit", "created_at": iso(base - timedelta(hours=6)), "eta": iso(base + timedelta(hours=2)), "delivery_confirmed": False, "has_bill_pdf": True, "amount_paid_on_delivery": 0, "amount_on_credit": 8650.00},
+            {"id": str(uuid.uuid4()), "code": "ORD-2342", "invoice_number": f"F0{datetime.now().strftime('%m%y')}-A{random.randint(1000000, 9999999)}", "user_id": user_id, "items": [{"product_id": "p-5", "name": "Pantoprazole 40mg", "qty_ordered": 30, "qty": 30, "free_qty": 3, "price": 89.50, "mrp": 124.00, "discount_pct": 4.0, "gst_pct": 12.0, "batch": f"B{random.randint(1000, 9999)}F", "expiry": "May 2027"}], "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "sku_count": 1, "total": 6450.00, "status": "shipped", "payment_method": "cash", "created_at": iso(base - timedelta(hours=8)), "eta": iso(base + timedelta(hours=1)), "delivery_confirmed": False, "has_bill_pdf": False, "amount_paid_on_delivery": 0, "amount_on_credit": 0},
+            {"id": str(uuid.uuid4()), "code": "ORD-2338", "invoice_number": f"F0{datetime.now().strftime('%m%y')}-A{random.randint(1000000, 9999999)}", "user_id": user_id, "items": [{"product_id": "p-9", "name": "Amoxicillin 500mg", "qty_ordered": 50, "qty": 50, "free_qty": 0, "price": 66.00, "mrp": 92.00, "discount_pct": 4.0, "gst_pct": 12.0, "batch": f"B{random.randint(1000, 9999)}G", "expiry": "Nov 2027"}], "distributor_id": "dist-5", "distributor_name": "Sun Wholesale", "sku_count": 4, "total": 14750.00, "status": "delivered", "payment_method": "cash", "created_at": iso(base - timedelta(days=1)), "eta": None, "delivery_confirmed": True, "delivery_confirmed_at": iso(base - timedelta(hours=20)), "has_bill_pdf": True, "amount_paid_on_delivery": 14750.00, "amount_on_credit": 0},
         ]
         await db.orders.insert_many(orders)
 
@@ -703,16 +703,34 @@ async def place_order(payment_method: str = "cash", distributor_id: Optional[str
             unit = price_entry["ptr"] if price_entry else p["ptr"]
             line = unit * it["qty"]
             total += line
-            order_items.append({"product_id": p["id"], "name": p["name"], "qty": it["qty"], "price": unit})
+            # Enrich line with batch + expiry (would come from distributor in real life)
+            batch_id = f"B{random.randint(1000, 9999)}{chr(65 + random.randint(0, 25))}"
+            exp = now_utc() + timedelta(days=random.randint(540, 900))
+            order_items.append({
+                "product_id": p["id"],
+                "name": p["name"],
+                "qty_ordered": it["qty"],
+                "qty": it["qty"],  # qty received (initially same; updated on delivery confirmation)
+                "free_qty": 0,
+                "price": unit,
+                "mrp": p.get("mrp", 0),
+                "discount_pct": (price_entry or {}).get("dist_discount_pct", 4.0),
+                "gst_pct": 12.0,
+                "batch": batch_id,
+                "expiry": exp.strftime("%b %Y"),
+            })
         # If credit, check + deduct distributor credit limit
         if pm == "credit" and d:
             available = (d.get("credit_limit", 0) - d.get("credit_used", 0))
             if total > available:
                 raise HTTPException(400, f"Credit insufficient with {d['short_name']}: ₹{available:.0f} available, ₹{total:.0f} required")
             await db.distributors.update_one({"id": dist_id}, {"$inc": {"credit_used": total}})
+        # Real distributor invoice number (mimics F022526-A00XXXXX format)
+        inv_num = f"F0{datetime.now().strftime('%m%y')}-A{random.randint(1000000, 9999999)}"
         order = {
             "id": str(uuid.uuid4()),
             "code": f"ORD-{code_suffix}",
+            "invoice_number": inv_num,
             "user_id": user["id"],
             "items": order_items,
             "distributor_id": dist_id,
@@ -723,6 +741,13 @@ async def place_order(payment_method: str = "cash", distributor_id: Optional[str
             "payment_method": pm,
             "created_at": iso(now_utc()),
             "eta": iso(now_utc() + timedelta(hours=4)),
+            "delivery_confirmed": False,
+            "delivery_confirmed_at": None,
+            "delivery_photo_url": None,
+            "delivery_notes": None,
+            "has_bill_pdf": random.random() > 0.3,  # ~70% of distributors uploaded a PDF bill
+            "amount_paid_on_delivery": 0,
+            "amount_on_credit": total if pm == "credit" else 0,
         }
         await db.orders.insert_one({**order})
         orders_created.append(order)
@@ -1673,6 +1698,229 @@ async def compare_distributors(a_id: str, b_id: str, user: dict = Depends(get_cu
 @api_router.get("/")
 async def root():
     return {"message": "RX Tech API"}
+
+
+# ============================================================
+# DELIVERY CONFIRMATION FLOW (critical) — pharmacist confirms
+# received items, qty (may be short), payment split (cash vs credit),
+# optional photo (required only when disputing).
+# ============================================================
+class ConfirmDeliveryReq(BaseModel):
+    items: List[dict]  # [{product_id, qty_received, free_qty?, batch?, expiry?, notes?}]
+    paid_now: float = 0
+    on_credit: float = 0
+    photo_url: Optional[str] = None
+    notes: Optional[str] = None
+    raise_dispute: bool = False
+
+
+@api_router.post("/orders/{order_id}/confirm-delivery")
+async def confirm_delivery(order_id: str, req: ConfirmDeliveryReq, user: dict = Depends(get_current_user)):
+    o = await db.orders.find_one({"id": order_id, "user_id": user["id"]}, {"_id": 0})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if o.get("delivery_confirmed"):
+        raise HTTPException(400, "Already confirmed")
+
+    # Update items with received qty + recompute total
+    new_total = 0.0
+    qty_short_total = 0.0  # value of short items
+    new_items = []
+    received_lookup = {r["product_id"]: r for r in req.items}
+    for it in o.get("items", []):
+        recv = received_lookup.get(it["product_id"], {})
+        qr = int(recv.get("qty_received", it.get("qty_ordered", it["qty"])))
+        fq = int(recv.get("free_qty", it.get("free_qty", 0)))
+        line_total = it["price"] * qr
+        new_total += line_total
+        ordered = it.get("qty_ordered", it["qty"])
+        if qr < ordered:
+            qty_short_total += it["price"] * (ordered - qr)
+        new_items.append({
+            **it,
+            "qty": qr,
+            "free_qty": fq,
+            "batch": recv.get("batch", it.get("batch")),
+            "expiry": recv.get("expiry", it.get("expiry")),
+            "line_notes": recv.get("notes"),
+        })
+
+    # Update credit_used: refund the qty-short value (since we charged the full amount at placement)
+    if o.get("payment_method") == "credit" and qty_short_total > 0:
+        await db.distributors.update_one(
+            {"id": o["distributor_id"]},
+            {"$inc": {"credit_used": -qty_short_total}},
+        )
+
+    update = {
+        "items": new_items,
+        "total": round(new_total, 2),
+        "status": "delivered",
+        "delivery_confirmed": True,
+        "delivery_confirmed_at": iso(now_utc()),
+        "delivery_photo_url": req.photo_url,
+        "delivery_notes": req.notes,
+        "amount_paid_on_delivery": round(req.paid_now, 2),
+        "amount_on_credit": round(req.on_credit, 2),
+        "qty_short_value": round(qty_short_total, 2),
+        "has_dispute": req.raise_dispute,
+    }
+    await db.orders.update_one({"id": order_id}, {"$set": update})
+
+    # Create a payment record for the credit portion (if any)
+    if req.on_credit > 0:
+        await db.payments.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": user["id"],
+            "distributor_id": o["distributor_id"],
+            "distributor_name": o["distributor_name"],
+            "invoice_code": o.get("invoice_number", o["code"]),
+            "amount": round(req.on_credit, 2),
+            "due_date": iso(now_utc() + timedelta(days=21)),
+            "status": "due",
+            "days_to_due": 21,
+        })
+
+    # Auto-create a debit note if short qty (since we paid for what we didn't receive)
+    if qty_short_total > 0 and not req.raise_dispute:
+        await db.debit_notes.insert_one({
+            "id": str(uuid.uuid4()),
+            "code": f"DN-S{random.randint(2400, 9999)}",
+            "user_id": user["id"],
+            "distributor_id": o["distributor_id"],
+            "order_id": order_id,
+            "amount": round(qty_short_total, 2),
+            "reason": "short-supply",
+            "notes": f"Auto: qty short on delivery confirmation",
+            "status": "issued",
+            "created_at": iso(now_utc()),
+        })
+
+    return {"success": True, "order_id": order_id, "new_total": round(new_total, 2), "qty_short_value": round(qty_short_total, 2)}
+
+
+# ============================================================
+# PAY LUMP SUM — settle multiple invoices at once
+# ============================================================
+class PayLumpSumReq(BaseModel):
+    payment_ids: List[str]
+
+
+@api_router.post("/payments/pay-lump-sum")
+async def pay_lump_sum(req: PayLumpSumReq, user: dict = Depends(get_current_user)):
+    total_paid = 0.0
+    for pid in req.payment_ids:
+        p = await db.payments.find_one({"id": pid, "user_id": user["id"]}, {"_id": 0})
+        if not p or p["status"] == "paid":
+            continue
+        await db.payments.update_one(
+            {"id": pid},
+            {"$set": {"status": "paid", "paid_at": iso(now_utc())}},
+        )
+        # Reduce credit_used for the distributor
+        if p.get("distributor_id"):
+            await db.distributors.update_one(
+                {"id": p["distributor_id"]},
+                {"$inc": {"credit_used": -p["amount"]}},
+            )
+        total_paid += p["amount"]
+    return {"success": True, "count": len(req.payment_ids), "total_paid": round(total_paid, 2)}
+
+
+# ============================================================
+# DISTRIBUTOR — LIST INVOICES (open vs history)
+# ============================================================
+@api_router.get("/distributors/{dist_id}/invoices")
+async def distributor_invoices(dist_id: str, user: dict = Depends(get_current_user)):
+    d = await db.distributors.find_one({"id": dist_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Not found")
+    payments = await db.payments.find(
+        {"user_id": user["id"], "distributor_id": dist_id},
+        {"_id": 0},
+    ).sort("due_date", 1).to_list(500)
+    open_inv = [p for p in payments if p["status"] in ("due", "overdue")]
+    history = [p for p in payments if p["status"] == "paid"]
+    overdue_total = sum(p["amount"] for p in open_inv if p["status"] == "overdue")
+    outstanding = sum(p["amount"] for p in open_inv)
+    return {
+        "distributor": d,
+        "open_invoices": open_inv,
+        "invoice_history": history,
+        "overdue": round(overdue_total, 2),
+        "outstanding": round(outstanding, 2),
+        "credit_limit": d.get("credit_limit", 0),
+        "credit_used": d.get("credit_used", 0),
+        "credit_used_pct": round((d.get("credit_used", 0) / max(d.get("credit_limit", 1), 1)) * 100, 1),
+    }
+
+
+# ============================================================
+# LEDGER CSV EXPORT
+# ============================================================
+@api_router.get("/ledger/{distributor_id}/export")
+async def ledger_export(
+    distributor_id: str,
+    format: str = "csv",
+    days: int = 90,
+    user: dict = Depends(get_current_user),
+):
+    """Export ledger as CSV. `days` filters the window."""
+    from io import StringIO
+    import csv
+    d = await db.distributors.find_one({"id": distributor_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Not found")
+
+    cutoff = now_utc() - timedelta(days=days)
+    orders = await db.orders.find({"user_id": user["id"], "distributor_id": distributor_id}, {"_id": 0}).to_list(500)
+    payments = await db.payments.find({"user_id": user["id"], "distributor_id": distributor_id}, {"_id": 0}).to_list(500)
+    credit_notes = await db.credit_notes.find({"user_id": user["id"], "distributor_id": distributor_id}, {"_id": 0}).to_list(200)
+    debit_notes = await db.debit_notes.find({"user_id": user["id"], "distributor_id": distributor_id}, {"_id": 0}).to_list(200)
+
+    rows = []
+    for o in orders:
+        rows.append([o["created_at"][:10], "BILL", o.get("invoice_number", o["code"]), o.get("sku_count", 0), o["total"], 0, o.get("status", "")])
+    for p in payments:
+        if p["status"] == "paid":
+            rows.append([(p.get("paid_at") or p["due_date"])[:10], "PAYMENT", p["invoice_code"], "", 0, p["amount"], "settled"])
+    for cn in credit_notes:
+        rows.append([cn["created_at"][:10], "CREDIT_NOTE", cn["code"], "", 0, cn["amount"], cn["reason"]])
+    for dn in debit_notes:
+        rows.append([dn["created_at"][:10], "DEBIT_NOTE", dn["code"], "", dn["amount"], 0, dn["reason"]])
+
+    # Filter by date window
+    rows = [r for r in rows if r[0] >= cutoff.date().isoformat()]
+    rows.sort(key=lambda r: r[0])
+
+    # Running balance
+    out = []
+    bal = 0.0
+    for r in rows:
+        bal += (r[4] or 0) - (r[5] or 0)
+        out.append(r + [round(bal, 2)])
+
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow(["LEDGER EXPORT", d["short_name"], f"Last {days} days"])
+    w.writerow([])
+    w.writerow(["Date", "Type", "Reference", "Items", "Debit (Bill)", "Credit (Paid)", "Status/Reason", "Running Balance"])
+    for r in out:
+        w.writerow(r)
+    w.writerow([])
+    w.writerow(["TOTALS"])
+    w.writerow(["Total Bills", "", "", "", sum(r[4] for r in out), "", "", ""])
+    w.writerow(["Total Paid", "", "", "", "", sum(r[5] for r in out), "", ""])
+    w.writerow(["Closing Balance", "", "", "", "", "", "", bal])
+
+    from fastapi.responses import Response
+    csv_text = buf.getvalue()
+    filename = f"ledger_{d['short_name'].replace(' ', '_')}_{days}d.csv"
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ============================================================

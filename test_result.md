@@ -479,3 +479,35 @@ agent_communication:
       3. GET /api/analytics/margin-by-category — returns {rows: [{category, spend, profit, margin_pct, items}], total_spend, total_profit}. 1 row aggregated, total_spend=8751.0, total_profit=2967.79. ✅
       4. GET /api/analytics/reorder-predictor — returns a list (currently empty for demo because no eligible SKUs have crossed the urgency threshold; this is by design and explicitly noted as acceptable in the request). ✅
       Existing regression endpoints all still pass: /dashboard, /payments/summary, /ledger/dist-1, /cart (GET+POST /cart/items), /chat/threads. No backend errors in supervisor logs.
+  - agent: "testing"
+    message: |
+      Tested NEW endpoints added this session against the public preview URL. 50/50 assertions PASS via /app/backend_test.py.
+
+      1) POST /api/orders/{order_id}/confirm-delivery
+         - Full match (qty_received == qty_ordered, paid_now=total, on_credit=0): order.status → "delivered", delivery_confirmed → true ✅
+         - Short delivery (qty_received < qty_ordered on one item): qty_short_value=408.0 returned, order.total reduced from 8650→2358, debit_note "DN-S6794" auto-created with reason="short-supply", order_id linked ✅
+         - Credit payment (on_credit=2685): new payment record created with status="due", invoice_code = order.invoice_number ✅
+         - Idempotency: second call returns 400 with detail "Already confirmed" ✅
+         - Mismatched paid_now (100) + on_credit (50) ≠ total (461.34): still 200 OK (UI handles validation) ✅
+
+      2) POST /api/payments/pay-lump-sum {payment_ids: [id1, id2]}
+         - Returns {success:true, count:2, total_paid:60950.0} ✅
+         - Both payments flipped to status="paid" with paid_at timestamp ✅
+         - Distributor.credit_used reduced (dist-1: 183592 → 141292) ✅
+
+      3) GET /api/distributors/{dist_id}/invoices
+         - Returns full payload {distributor, open_invoices[], invoice_history[], overdue, outstanding, credit_limit, credit_used, credit_used_pct} — all required keys present ✅
+
+      4) GET /api/ledger/{distributor_id}/export?format=csv&days=90
+         - 200 OK, Content-Type "text/csv; charset=utf-8" ✅
+         - Body starts with "LEDGER EXPORT,ABC Pharma,Last 90 days" then header "Date,Type,Reference,Items,Debit (Bill),Credit (Paid),Status/Reason,Running Balance" ✅
+         - Includes BILL / PAYMENT / CREDIT_NOTE / DEBIT_NOTE rows + totals block ✅
+
+      5) Order schema verification
+         - invoice_number present in format "F00526-A9176475" (F0MMYY-AXXXXXXX) ✅
+         - has_bill_pdf (bool), delivery_confirmed (bool), amount_paid_on_delivery (number), amount_on_credit (number) all present ✅
+         - Item fields batch, expiry, qty_ordered, free_qty, mrp, discount_pct, gst_pct all present ✅
+
+      6) Regression: /api/dashboard, /api/payments/summary, /api/ledger/dist-1, /api/cart, /api/distributors/dist-1, /api/chat/threads, /api/analytics/margin-by-category — all 200 OK ✅
+
+      No 4xx/5xx errors except the intentional 400 for idempotency. Backend behavior matches the spec in the review request.

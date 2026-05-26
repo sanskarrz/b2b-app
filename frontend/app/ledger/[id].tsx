@@ -105,6 +105,20 @@ export default function Ledger() {
               <Ionicons name="chatbubble-outline" size={14} color="#FFF" />
               <Text style={styles.heroActionText}>Chat</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.heroAction}
+              onPress={() => {
+                const base = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/+$/, "");
+                const url = `${base}/api/ledger/${id}/export?format=csv&days=90`;
+                if (typeof window !== "undefined") {
+                  window.open(url, "_blank");
+                }
+              }}
+              testID="ledger-export"
+            >
+              <Ionicons name="download-outline" size={14} color="#FFF" />
+              <Text style={styles.heroActionText}>Export CSV</Text>
+            </TouchableOpacity>
           </View>
         </LinearGradient>
 
