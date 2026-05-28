@@ -15,6 +15,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { TopBar } from "@/src/components/TopBar";
 import { Button } from "@/src/components/Button";
 import { confirm, choice } from "@/src/components/confirm";
+import { showError, showSuccess, showInfo } from "@/src/components/Toast";
 import { api } from "@/src/api";
 import { colors, radius, formatINRFull } from "@/src/theme";
 
@@ -43,6 +44,8 @@ export default function Cart() {
       ]);
       setCart(data);
       setSubstitutes(subs);
+    } catch (e: any) {
+      showError(e?.message || "Could not load cart", "Load failed");
     } finally {
       setLoading(false);
     }
@@ -53,24 +56,23 @@ export default function Cart() {
     try {
       const res: any = await api("/cart/optimize", { method: "POST" });
       if (res.moved === 0) {
-        confirm("Already optimal", "Your cart is already on the lowest-PTR distributors.", [{ text: "OK" }]);
+        showInfo("Your cart is already on the lowest-PTR distributors.", "Already optimal");
       } else {
-        confirm(
-          "Cart optimized!",
-          `Switched ${res.moved} item(s). You save ${formatINRFull(res.savings)}.`,
-          [{ text: "Awesome", onPress: load }]
-        );
+        showSuccess(`Switched ${res.moved} item(s). You save ${formatINRFull(res.savings)}.`, "Cart optimized!");
       }
       load();
     } catch (e: any) {
-      confirm("Error", e.message, [{ text: "OK" }]);
+      showError(e?.message || "Could not optimize cart", "Optimization failed");
     } finally {
       setOptimizing(false);
     }
   };
 
   const saveAsTemplate = () => {
-    if (cart.items.length === 0) return;
+    if (cart.items.length === 0) {
+      showInfo("Add at least one item to your cart before saving as a template.");
+      return;
+    }
     router.push("/templates");
   };
 
@@ -80,9 +82,10 @@ export default function Cart() {
         method: "POST",
         body: { product_id: sub.suggested.product_id, distributor_id: sub.suggested.distributor_id },
       });
+      showSuccess("Switched to cheaper brand");
       load();
     } catch (e: any) {
-      confirm("Error", e.message, [{ text: "OK" }]);
+      showError(e?.message || "Could not swap product", "Swap failed");
     }
   };
 
@@ -97,13 +100,21 @@ export default function Cart() {
   };
 
   const updateQty = async (id: string, qty: number) => {
-    await api(`/cart/items/${id}`, { method: "PATCH", body: { qty } });
-    load();
+    try {
+      await api(`/cart/items/${id}`, { method: "PATCH", body: { qty } });
+      load();
+    } catch (e: any) {
+      showError(e?.message || "Could not update quantity", "Update failed");
+    }
   };
 
   const remove = async (id: string) => {
-    await api(`/cart/items/${id}`, { method: "DELETE" });
-    load();
+    try {
+      await api(`/cart/items/${id}`, { method: "DELETE" });
+      load();
+    } catch (e: any) {
+      showError(e?.message || "Could not remove item", "Remove failed");
+    }
   };
 
   const placeOrder = async (
@@ -117,6 +128,10 @@ export default function Cart() {
       if (distributorId) qs.push(`distributor_id=${distributorId}`);
       const path = `/orders?${qs.join("&")}`;
       const res: any = await api(path, { method: "POST" });
+      showSuccess(
+        `${res.orders.length} order(s) placed via ${paymentMethod === "credit" ? "Credit Line" : "Cash"}`,
+        "Order placed!"
+      );
       choice(
         "Order placed!",
         `${res.orders.length} order(s) placed via ${paymentMethod === "credit" ? "Credit Line" : "Cash"}.`,
@@ -124,7 +139,7 @@ export default function Cart() {
         { text: "Continue shopping", onPress: () => load() }
       );
     } catch (e: any) {
-      confirm("Order failed", e.message, [{ text: "OK" }]);
+      showError(e?.message || "Could not place order", "Order failed");
     } finally {
       setPlacing(null);
     }

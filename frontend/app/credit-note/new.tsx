@@ -3,12 +3,13 @@ import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator,
   KeyboardAvoidingView, Platform,
 } from "react-native";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { TopBar } from "@/src/components/TopBar";
 import { api } from "@/src/api";
+import { showError, showSuccess } from "@/src/components/Toast";
 import { colors, radius, formatINRFull } from "@/src/theme";
 import { confirm } from "@/src/components/confirm";
 
@@ -31,15 +32,32 @@ export default function NewCreditNote() {
   const [reason, setReason] = useState("damaged");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    api("/distributors").then(setDistributors).catch(() => {});
+    api("/distributors")
+      .then(setDistributors)
+      .catch((e: any) => showError(e?.message || "Could not load distributors", "Load failed"));
   }, []);
 
+  const amt = parseFloat(amount);
+  const errors = useMemo(() => {
+    const e: Record<string, string> = {};
+    if (!distributorId) e.distributor = "Pick a distributor";
+    if (!amount.trim()) e.amount = "Amount is required";
+    else if (isNaN(amt)) e.amount = "Enter a valid number";
+    else if (amt <= 0) e.amount = "Amount must be greater than zero";
+    else if (amt > 10_000_000) e.amount = "Amount looks too large — please double-check";
+    return e;
+  }, [distributorId, amount, amt]);
+
+  const isValid = Object.keys(errors).length === 0;
+
   const submit = async () => {
-    const amt = parseFloat(amount);
-    if (!distributorId || !amt || amt <= 0) {
-      confirm("Missing info", "Pick a distributor and enter a valid amount.", [{ text: "OK" }]);
+    setTouched({ distributor: true, amount: true });
+    if (!isValid) {
+      const first = errors.distributor || errors.amount;
+      showError(first || "Please fill the required fields", "Cannot submit");
       return;
     }
     setSubmitting(true);
@@ -53,6 +71,7 @@ export default function NewCreditNote() {
           notes: notes.trim() || null,
         },
       });
+      showSuccess(`₹${amt.toLocaleString("en-IN")} adjusted on ledger`, "Credit Note created");
       confirm("Credit Note created", `₹${amt.toLocaleString("en-IN")} adjusted on ledger.`, [
         {
           text: "View Ledger",
@@ -60,7 +79,11 @@ export default function NewCreditNote() {
         },
       ]);
     } catch (e: any) {
-      confirm("Error", e.message, [{ text: "OK" }]);
+      // Apply server-side field errors if any
+      if (e?.fields && Object.keys(e.fields).length) {
+        setTouched((t) => ({ ...t, ...Object.fromEntries(Object.keys(e.fields).map((k) => [k, true])) }));
+      }
+      showError(e?.message || "Could not create credit note", "Submit failed");
     } finally {
       setSubmitting(false);
     }
@@ -71,34 +94,50 @@ export default function NewCreditNote() {
       <TopBar title="New Credit Note" subtitle="Adjust ledger balance" showBack />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 30 }}>
-          <Text style={styles.label}>Distributor</Text>
+          <Text style={styles.label}>Distributor *</Text>
           <View style={styles.distList}>
-            {distributors.map((d: any) => (
-              <TouchableOpacity
-                key={d.id}
-                style={[styles.distChip, distributorId === d.id && styles.distChipActive]}
-                onPress={() => setDistributorId(d.id)}
-              >
-                <Text style={[styles.distChipText, distributorId === d.id && styles.distChipTextActive]}>
-                  {d.short_name}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {distributors.length === 0 ? (
+              <Text style={styles.emptyDist}>Loading distributors...</Text>
+            ) : (
+              distributors.map((d: any) => (
+                <TouchableOpacity
+                  key={d.id}
+                  style={[styles.distChip, distributorId === d.id && styles.distChipActive]}
+                  onPress={() => { setDistributorId(d.id); setTouched((t) => ({ ...t, distributor: true })); }}
+                >
+                  <Text style={[styles.distChipText, distributorId === d.id && styles.distChipTextActive]}>
+                    {d.short_name}
+                  </Text>
+                </TouchableOpacity>
+              ))
+            )}
           </View>
+          {touched.distributor && errors.distributor ? (
+            <View style={styles.errorRow}>
+              <Ionicons name="alert-circle" size={12} color={colors.danger} />
+              <Text style={styles.errorText}>{errors.distributor}</Text>
+            </View>
+          ) : null}
 
-          <Text style={[styles.label, { marginTop: 18 }]}>Amount (₹)</Text>
+          <Text style={[styles.label, { marginTop: 18 }]}>Amount (₹) *</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, touched.amount && errors.amount ? styles.inputError : null]}
             value={amount}
-            onChangeText={setAmount}
+            onChangeText={(v) => setAmount(v.replace(/[^\d.]/g, ""))}
+            onBlur={() => setTouched((t) => ({ ...t, amount: true }))}
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={colors.textTertiary}
             testID="cn-amount"
           />
-          {amount && parseFloat(amount) > 0 && (
-            <Text style={styles.amountPreview}>{formatINRFull(parseFloat(amount))}</Text>
-          )}
+          {touched.amount && errors.amount ? (
+            <View style={styles.errorRow}>
+              <Ionicons name="alert-circle" size={12} color={colors.danger} />
+              <Text style={styles.errorText}>{errors.amount}</Text>
+            </View>
+          ) : amount && !isNaN(amt) && amt > 0 ? (
+            <Text style={styles.amountPreview}>{formatINRFull(amt)}</Text>
+          ) : null}
 
           <Text style={[styles.label, { marginTop: 18 }]}>Reason</Text>
           <View style={styles.reasonGrid}>
@@ -117,11 +156,12 @@ export default function NewCreditNote() {
           <TextInput
             style={[styles.input, { height: 80, textAlignVertical: "top" }]}
             value={notes}
-            onChangeText={setNotes}
+            onChangeText={(v) => setNotes(v.slice(0, 500))}
             multiline
             placeholder="E.g., 5 strips returned, batch B-234..."
             placeholderTextColor={colors.textTertiary}
           />
+          <Text style={styles.hint}>{notes.length}/500</Text>
 
           <View style={styles.infoBox}>
             <Ionicons name="information-circle" size={14} color={colors.info} />
@@ -131,9 +171,9 @@ export default function NewCreditNote() {
           </View>
 
           <TouchableOpacity
-            style={[styles.submitBtn, (submitting || !distributorId || !amount) && { opacity: 0.5 }]}
+            style={[styles.submitBtn, (submitting || !isValid) && { opacity: 0.55 }]}
             onPress={submit}
-            disabled={submitting || !distributorId || !amount}
+            disabled={submitting}
             testID="cn-submit"
           >
             {submitting ? (
@@ -155,6 +195,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   label: { fontSize: 12, color: colors.textSecondary, fontWeight: "700", letterSpacing: 0.4, marginBottom: 8 },
   distList: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  emptyDist: { color: colors.textSecondary, fontSize: 12, fontStyle: "italic" },
   distChip: {
     paddingHorizontal: 12, paddingVertical: 8,
     backgroundColor: colors.surface,
@@ -170,6 +211,13 @@ const styles = StyleSheet.create({
     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
     fontSize: 15, color: colors.text,
   },
+  inputError: {
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerBg + "40",
+  },
+  errorRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6 },
+  errorText: { fontSize: 11.5, color: colors.danger, fontWeight: "600" },
+  hint: { fontSize: 10.5, color: colors.textTertiary, marginTop: 4, textAlign: "right" },
   amountPreview: { color: colors.primary, fontWeight: "800", fontSize: 16, marginTop: 6 },
   reasonGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   reasonChip: {

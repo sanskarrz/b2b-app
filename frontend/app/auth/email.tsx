@@ -3,10 +3,8 @@ import {
   Text,
   StyleSheet,
   TextInput,
-  TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from "react-native";
 import { useState } from "react";
 import { useRouter } from "expo-router";
@@ -14,30 +12,45 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Button } from "@/src/components/Button";
 import { api } from "@/src/api";
+import { showError } from "@/src/components/Toast";
 import { colors } from "@/src/theme";
+
+const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function EmailEntry() {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [touched, setTouched] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const trimmed = email.trim();
+  const isEmpty = trimmed.length === 0;
+  const isValid = EMAIL_RX.test(trimmed);
+  const fieldError = touched && !isEmpty && !isValid ? "Enter a valid email like you@pharmacy.com" : "";
 
   const onContinue = async () => {
-    if (!isValid) return;
+    setTouched(true);
+    if (isEmpty) {
+      showError("Email is required");
+      return;
+    }
+    if (!isValid) {
+      showError("Please enter a valid email address");
+      return;
+    }
     setLoading(true);
     try {
       const res: any = await api("/auth/send-otp", {
         method: "POST",
-        body: { email: email.trim() },
+        body: { email: trimmed },
         auth: false,
       });
       router.push({
         pathname: "/auth/otp",
-        params: { email: email.trim(), devOtp: res.dev_otp || "" },
+        params: { email: trimmed, devOtp: res.dev_otp || "" },
       });
     } catch (e: any) {
-      Alert.alert("Error", e.message || "Could not send OTP");
+      showError(e?.message || "Could not send OTP. Please try again.", "Sign-in failed");
     } finally {
       setLoading(false);
     }
@@ -62,12 +75,17 @@ export default function EmailEntry() {
           <View style={{ height: 40 }} />
 
           <Text style={styles.label}>Email</Text>
-          <View style={styles.inputRow}>
-            <Ionicons name="mail-outline" size={18} color={colors.textSecondary} />
+          <View style={[styles.inputRow, fieldError ? styles.inputRowError : null]}>
+            <Ionicons
+              name="mail-outline"
+              size={18}
+              color={fieldError ? colors.danger : colors.textSecondary}
+            />
             <TextInput
               style={styles.input}
               value={email}
               onChangeText={setEmail}
+              onBlur={() => setTouched(true)}
               placeholder="you@pharmacy.com"
               placeholderTextColor={colors.textTertiary}
               keyboardType="email-address"
@@ -77,7 +95,14 @@ export default function EmailEntry() {
               testID="email-input"
             />
           </View>
-          <Text style={styles.help}>We&apos;ll send a 6-digit OTP to verify.</Text>
+          {fieldError ? (
+            <View style={styles.errorRow}>
+              <Ionicons name="alert-circle" size={12} color={colors.danger} />
+              <Text style={styles.errorText}>{fieldError}</Text>
+            </View>
+          ) : (
+            <Text style={styles.help}>We&apos;ll send a 6-digit OTP to verify.</Text>
+          )}
 
           <View style={{ height: 28 }} />
 
@@ -131,6 +156,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  inputRowError: {
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerBg + "40",
+  },
   input: {
     flex: 1,
     fontSize: 16,
@@ -139,6 +168,8 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   help: { fontSize: 12, color: colors.textSecondary, marginTop: 8 },
+  errorRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
+  errorText: { fontSize: 12, color: colors.danger, fontWeight: "600" },
   legal: { marginTop: 32, alignItems: "center" },
   legalText: { fontSize: 11, color: colors.textTertiary, textAlign: "center" },
 });

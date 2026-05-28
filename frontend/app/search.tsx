@@ -10,7 +10,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
@@ -18,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { api } from "@/src/api";
+import { showError, showSuccess, showWarning } from "@/src/components/Toast";
 import { colors, radius, formatINRFull } from "@/src/theme";
 
 const RECENT = ["Azithromycin", "Paracetamol", "Cetirizine", "Metformin"];
@@ -101,7 +101,10 @@ export default function Search() {
           ? await ImagePicker.requestCameraPermissionsAsync()
           : await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert("Permission needed", `Allow ${mode === "camera" ? "camera" : "photos"}`);
+        showWarning(
+          `Please allow ${mode === "camera" ? "camera" : "photo library"} access in settings to use Scan.`,
+          "Permission needed"
+        );
         return;
       }
       const result =
@@ -111,14 +114,14 @@ export default function Search() {
       if (result.canceled || !result.assets?.[0]?.base64) return;
       router.push({ pathname: "/scan-result", params: { image: result.assets[0].base64 } });
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      showError(e?.message || "Could not start scan", "Scan failed");
     }
   };
 
   const addOffer = async (productId: string, offer: Offer) => {
     // Validation: out of stock?
     if (offer.qty_available != null && offer.qty_available <= 0) {
-      Alert.alert("Out of stock", `${offer.distributor_name} has 0 units of this medicine.`);
+      showWarning(`${offer.distributor_name} has 0 units of this medicine.`, "Out of stock");
       return;
     }
     const key = `${productId}-${offer.distributor_id}`;
@@ -129,8 +132,9 @@ export default function Search() {
         body: { product_id: productId, distributor_id: offer.distributor_id, qty: 1 },
       });
       await refreshCart();
+      showSuccess(`Added from ${offer.distributor_name}`);
     } catch (e: any) {
-      Alert.alert("Could not add", e.message || "Unknown error");
+      showError(e?.message || "Could not add to cart", "Add failed");
     } finally {
       setAdding(null);
     }

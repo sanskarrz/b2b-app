@@ -17,6 +17,7 @@ import { TopBar } from "@/src/components/TopBar";
 import { api } from "@/src/api";
 import { colors, radius, formatINRFull } from "@/src/theme";
 import { confirm } from "@/src/components/confirm";
+import { showError, showSuccess } from "@/src/components/Toast";
 
 function formatDate(iso?: string) {
   if (!iso) return "";
@@ -48,6 +49,8 @@ export default function DistributorInvoices() {
     try {
       const d = await api(`/distributors/${id}/invoices`);
       setData(d);
+    } catch (e: any) {
+      showError(e?.message || "Could not load invoices", "Load failed");
     } finally {
       setLoading(false);
     }
@@ -106,13 +109,16 @@ export default function DistributorInvoices() {
             try {
               const r = await api("/payments/pay-lump-sum", {
                 method: "POST",
-                body: JSON.stringify({ payment_ids: ids }),
+                body: { payment_ids: ids },
               });
               setSelected(new Set());
               await load();
-              confirm("Payment Successful", `Paid ${formatINRFull(r.total_paid)} across ${r.count} invoices. Credit line restored.`, [
-                { text: "OK" },
-              ]);
+              showSuccess(
+                `Paid ${formatINRFull(r.total_paid)} across ${r.count} invoices. Credit line restored.`,
+                "Payment Successful"
+              );
+            } catch (e: any) {
+              showError(e?.message || "Could not complete payment", "Payment failed");
             } finally {
               setPaying(false);
             }

@@ -10,6 +10,7 @@ import { TopBar } from "@/src/components/TopBar";
 import { api } from "@/src/api";
 import { colors, radius, formatINRFull } from "@/src/theme";
 import { confirm } from "@/src/components/confirm";
+import { showError, showSuccess } from "@/src/components/Toast";
 
 export default function Templates() {
   const router = useRouter();
@@ -18,11 +19,14 @@ export default function Templates() {
   const [saving, setSaving] = useState(false);
   const [modal, setModal] = useState(false);
   const [name, setName] = useState("");
+  const [nameError, setNameError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       setItems(await api("/templates"));
+    } catch (e: any) {
+      showError(e?.message || "Could not load templates", "Load failed");
     } finally {
       setLoading(false);
     }
@@ -31,15 +35,31 @@ export default function Templates() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const save = async () => {
-    if (!name.trim()) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setNameError("Template name is required");
+      return;
+    }
+    if (trimmed.length < 3) {
+      setNameError("Name must be at least 3 characters");
+      return;
+    }
+    if (trimmed.length > 60) {
+      setNameError("Name must be 60 characters or less");
+      return;
+    }
+    setNameError("");
     setSaving(true);
     try {
-      await api("/templates", { method: "POST", body: { name: name.trim() } });
+      await api("/templates", { method: "POST", body: { name: trimmed } });
       setModal(false);
       setName("");
+      showSuccess(`"${trimmed}" saved`, "Template created");
       load();
     } catch (e: any) {
-      confirm("Cannot save", e.message, [{ text: "OK" }]);
+      const msg = e?.message || "Could not save template";
+      setNameError(msg);
+      showError(msg, "Cannot save");
     } finally {
       setSaving(false);
     }
@@ -48,12 +68,13 @@ export default function Templates() {
   const loadTemplate = async (id: string) => {
     try {
       const res: any = await api(`/templates/${id}/load`, { method: "POST" });
+      showSuccess(`${res.added} items added to cart`, "Template loaded");
       confirm("Template loaded", `${res.added} items added to cart`, [
         { text: "Go to Cart", onPress: () => router.push("/cart") },
         { text: "Stay", style: "cancel" },
       ]);
     } catch (e: any) {
-      confirm("Error", e.message, [{ text: "OK" }]);
+      showError(e?.message || "Could not load template into cart", "Load failed");
     }
   };
 
@@ -64,8 +85,13 @@ export default function Templates() {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          await api(`/templates/${id}`, { method: "DELETE" });
-          load();
+          try {
+            await api(`/templates/${id}`, { method: "DELETE" });
+            showSuccess(`"${n}" deleted`);
+            load();
+          } catch (e: any) {
+            showError(e?.message || "Could not delete template", "Delete failed");
+          }
         },
       },
     ]);
@@ -122,20 +148,29 @@ export default function Templates() {
       )}
 
       {/* Add template modal */}
-      <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
+      <Modal visible={modal} transparent animationType="slide" onRequestClose={() => { setModal(false); setNameError(""); }}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Save current cart as template</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, nameError ? styles.inputError : null]}
               placeholder="e.g., Monthly Antibiotics Stock"
               placeholderTextColor={colors.textTertiary}
               value={name}
-              onChangeText={setName}
+              onChangeText={(v) => { setName(v); if (nameError) setNameError(""); }}
+              maxLength={60}
               autoFocus
             />
+            {nameError ? (
+              <View style={styles.errorRow}>
+                <Ionicons name="alert-circle" size={12} color={colors.danger} />
+                <Text style={styles.errorText}>{nameError}</Text>
+              </View>
+            ) : (
+              <Text style={styles.charCount}>{name.length}/60</Text>
+            )}
             <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setModal(false); setName(""); }}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setModal(false); setName(""); setNameError(""); }}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -177,6 +212,10 @@ const styles = StyleSheet.create({
   modalCard: { backgroundColor: "#FFF", padding: 18, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 30 },
   modalTitle: { fontSize: 15, fontWeight: "800", color: colors.text, marginBottom: 12 },
   input: { backgroundColor: colors.surface, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, fontSize: 14, color: colors.text, borderWidth: 1, borderColor: colors.border },
+  inputError: { borderColor: colors.danger, backgroundColor: colors.dangerBg + "40" },
+  errorRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6 },
+  errorText: { fontSize: 11.5, color: colors.danger, fontWeight: "600" },
+  charCount: { fontSize: 10.5, color: colors.textTertiary, marginTop: 4, textAlign: "right" },
   cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.surface, alignItems: "center" },
   cancelBtnText: { color: colors.text, fontWeight: "700" },
   saveBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.primary, alignItems: "center" },

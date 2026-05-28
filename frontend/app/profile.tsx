@@ -6,16 +6,19 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ActivityIndicator,
 } from "react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { TopBar } from "@/src/components/TopBar";
 import { Button } from "@/src/components/Button";
 import { api } from "@/src/api";
+import { showError, showSuccess } from "@/src/components/Toast";
 import { colors, radius } from "@/src/theme";
+
+const GST_RX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9][A-Z][0-9A-Z]$/;
 
 export default function Profile() {
   const router = useRouter();
@@ -27,6 +30,7 @@ export default function Profile() {
   const [gst, setGst] = useState("");
   const [address, setAddress] = useState("");
   const [email, setEmail] = useState("");
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     (async () => {
@@ -38,19 +42,36 @@ export default function Profile() {
         setGst(me.gst || "");
         setAddress(me.address || "");
         setEmail(me.email || "");
+      } catch (e: any) {
+        showError(e?.message || "Could not load profile", "Load failed");
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
+  const errors = useMemo(() => {
+    const e: Record<string, string> = {};
+    if (!name.trim()) e.name = "Your name is required";
+    else if (name.trim().length < 2) e.name = "Name must be at least 2 characters";
+
+    if (!phone.trim()) e.phone = "Phone number is required";
+    else if (!/^\d{10}$/.test(phone.trim())) e.phone = "Enter a valid 10-digit phone";
+    else if (!/^[6-9]/.test(phone.trim())) e.phone = "Indian mobile must start with 6, 7, 8 or 9";
+
+    if (gst.trim() && !GST_RX.test(gst.trim())) e.gst = "Invalid GSTIN format (e.g., 27ABCDE1234F1Z5)";
+
+    return e;
+  }, [name, phone, gst]);
+
+  const valid = !errors.name && !errors.phone && !errors.gst;
+
+  const markTouched = (k: string) => setTouched((t) => ({ ...t, [k]: true }));
+
   const save = async () => {
-    if (name.trim().length < 2) {
-      Alert.alert("Name required");
-      return;
-    }
-    if (!/^\d{10}$/.test(phone)) {
-      Alert.alert("Enter a valid 10-digit phone");
+    setTouched({ name: true, phone: true, gst: true });
+    if (!valid) {
+      showError(errors.name || errors.phone || errors.gst || "Please fix the highlighted fields", "Cannot save");
       return;
     }
     setSaving(true);
@@ -65,9 +86,13 @@ export default function Profile() {
           address: address.trim(),
         },
       });
-      Alert.alert("Saved", "Profile updated", [{ text: "OK", onPress: () => router.back() }]);
+      showSuccess("Profile updated", "Saved");
+      router.back();
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      if (e?.fields && Object.keys(e.fields).length) {
+        setTouched((t) => ({ ...t, ...Object.fromEntries(Object.keys(e.fields).map((k) => [k, true])) }));
+      }
+      showError(e?.message || "Could not update profile", "Save failed");
     } finally {
       setSaving(false);
     }
@@ -92,16 +117,34 @@ export default function Profile() {
             <Text style={styles.emailValue}>{email}</Text>
           </View>
 
-          <Field label="Your name *" value={name} onChange={setName} testID="profile-name" />
+          <Field
+            label="Your name *"
+            value={name}
+            onChange={setName}
+            onBlur={() => markTouched("name")}
+            error={touched.name ? errors.name : undefined}
+            testID="profile-name"
+          />
           <Field
             label="Phone number *"
             value={phone}
             onChange={(v) => setPhone(v.replace(/\D/g, "").slice(0, 10))}
+            onBlur={() => markTouched("phone")}
             keyboardType="phone-pad"
+            error={touched.phone ? errors.phone : undefined}
             testID="profile-phone"
           />
           <Field label="Shop name" value={shopName} onChange={setShopName} testID="profile-shop" />
-          <Field label="GST number" value={gst} onChange={(v) => setGst(v.toUpperCase())} testID="profile-gst" />
+          <Field
+            label="GST number"
+            value={gst}
+            onChange={(v) => setGst(v.toUpperCase().slice(0, 15))}
+            onBlur={() => markTouched("gst")}
+            error={touched.gst ? errors.gst : undefined}
+            hint={!touched.gst || !errors.gst ? "Optional — 15-character GSTIN" : undefined}
+            testID="profile-gst"
+            autoCapitalize="characters"
+          />
           <Field
             label="Shop address"
             value={address}
@@ -111,7 +154,7 @@ export default function Profile() {
           />
 
           <View style={{ height: 20 }} />
-          <Button title="Save Changes" onPress={save} loading={saving} fullWidth testID="profile-save" />
+          <Button title="Save Changes" onPress={save} loading={saving} disabled={!valid} fullWidth testID="profile-save" />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -122,30 +165,52 @@ function Field({
   label,
   value,
   onChange,
+  onBlur,
   keyboardType,
   multiline,
   testID,
+  error,
+  hint,
+  autoCapitalize,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  onBlur?: () => void;
   keyboardType?: any;
   multiline?: boolean;
   testID?: string;
+  error?: string;
+  hint?: string;
+  autoCapitalize?: "characters" | "words" | "sentences" | "none";
 }) {
   return (
     <View style={{ marginBottom: 14 }}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
-        style={[styles.input, multiline && { height: 80, paddingTop: 14 }]}
+        style={[
+          styles.input,
+          multiline && { height: 80, paddingTop: 14 },
+          error ? styles.inputError : null,
+        ]}
         value={value}
         onChangeText={onChange}
+        onBlur={onBlur}
         keyboardType={keyboardType}
         multiline={multiline}
         textAlignVertical={multiline ? "top" : "center"}
         placeholderTextColor={colors.textTertiary}
         testID={testID}
+        autoCapitalize={autoCapitalize}
       />
+      {error ? (
+        <View style={styles.errorRow}>
+          <Ionicons name="alert-circle" size={12} color={colors.danger} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : hint ? (
+        <Text style={styles.hint}>{hint}</Text>
+      ) : null}
     </View>
   );
 }
@@ -173,4 +238,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.text,
   },
+  inputError: { borderColor: colors.danger, backgroundColor: colors.dangerBg + "40" },
+  errorRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6 },
+  errorText: { fontSize: 11.5, color: colors.danger, fontWeight: "600" },
+  hint: { fontSize: 11, color: colors.textTertiary, marginTop: 6, fontWeight: "500" },
 });

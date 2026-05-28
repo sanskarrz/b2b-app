@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from "react-native";
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -14,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Button } from "@/src/components/Button";
 import { api, setToken } from "@/src/api";
+import { showError, showSuccess, showInfo } from "@/src/components/Toast";
 import { colors } from "@/src/theme";
 
 export default function OtpScreen() {
@@ -22,6 +22,8 @@ export default function OtpScreen() {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
   const [resendIn, setResendIn] = useState(30);
+  const [hasError, setHasError] = useState(false);
+  const [errorText, setErrorText] = useState("");
   const inputs = useRef<TextInput[]>([]);
 
   useEffect(() => {
@@ -30,8 +32,11 @@ export default function OtpScreen() {
     return () => clearInterval(id);
   }, [resendIn]);
 
+  const clearError = () => { if (hasError) { setHasError(false); setErrorText(""); } };
+
   const handleChange = (val: string, idx: number) => {
     const sanitized = val.replace(/\D/g, "");
+    clearError();
     if (!sanitized) {
       const next = [...otp];
       next[idx] = "";
@@ -59,7 +64,11 @@ export default function OtpScreen() {
   const code = otp.join("");
 
   const onVerify = async () => {
-    if (code.length !== 6) return;
+    if (code.length !== 6) {
+      setHasError(true);
+      setErrorText("Enter all 6 digits to continue");
+      return;
+    }
     setLoading(true);
     try {
       const res: any = await api("/auth/verify-otp", {
@@ -71,7 +80,10 @@ export default function OtpScreen() {
       if (res.onboarded) router.replace("/(tabs)/home");
       else router.replace("/auth/onboarding");
     } catch (e: any) {
-      Alert.alert("Invalid OTP", e.message || "Please check the code");
+      setHasError(true);
+      const msg = e?.message || "Please check the code";
+      setErrorText(msg);
+      showError(msg, "Invalid OTP");
       setOtp(["", "", "", "", "", ""]);
       inputs.current[0]?.focus();
     } finally {
@@ -81,6 +93,7 @@ export default function OtpScreen() {
 
   const onResend = async () => {
     if (resendIn > 0) return;
+    clearError();
     try {
       const res: any = await api("/auth/send-otp", {
         method: "POST",
@@ -89,12 +102,12 @@ export default function OtpScreen() {
       });
       setResendIn(30);
       if (res.dev_otp) {
-        Alert.alert("OTP Resent", `Dev OTP: ${res.dev_otp}`);
+        showInfo(`Dev OTP: ${res.dev_otp}`, "OTP Resent");
       } else {
-        Alert.alert("OTP Resent", `Check ${email}`);
+        showSuccess(`Check ${email}`, "OTP Resent");
       }
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      showError(e?.message || "Could not resend OTP. Try again.", "Resend failed");
     }
   };
 
@@ -132,7 +145,11 @@ export default function OtpScreen() {
                 ref={(r) => {
                   if (r) inputs.current[i] = r;
                 }}
-                style={[styles.otpBox, v ? styles.otpBoxFilled : null]}
+                style={[
+                  styles.otpBox,
+                  v ? styles.otpBoxFilled : null,
+                  hasError ? styles.otpBoxError : null,
+                ]}
                 value={v}
                 onChangeText={(val) => handleChange(val, i)}
                 onKeyPress={(e) => handleKey(e, i)}
@@ -143,6 +160,13 @@ export default function OtpScreen() {
               />
             ))}
           </View>
+
+          {hasError ? (
+            <View style={styles.errorRow}>
+              <Ionicons name="alert-circle" size={14} color={colors.danger} />
+              <Text style={styles.errorText}>{errorText}</Text>
+            </View>
+          ) : null}
 
           <Button
             title="Verify & Continue"
@@ -192,7 +216,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   devBannerText: { color: colors.info, fontSize: 13, fontWeight: "600" },
-  otpRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 36, marginBottom: 36 },
+  otpRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 36, marginBottom: 12 },
   otpBox: {
     width: 48,
     height: 56,
@@ -206,6 +230,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   otpBoxFilled: { borderColor: colors.text, backgroundColor: colors.bg },
+  otpBoxError: { borderColor: colors.danger, backgroundColor: colors.dangerBg + "40" },
+  errorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginBottom: 18,
+  },
+  errorText: { color: colors.danger, fontSize: 12.5, fontWeight: "600", flex: 1 },
   resend: { alignItems: "center", marginTop: 20 },
   resendText: { color: colors.textSecondary, fontSize: 14 },
 });

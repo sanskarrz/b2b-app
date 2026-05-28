@@ -434,6 +434,31 @@
         agent: "main"
         comment: "New screen /dist-invoices/[id] shows gradient hero with outstanding amount, overdue + open counts, in-hero Credit Used progress bar (color-coded green/amber/red). Two tabs: Open (N) and History (N). Open tab supports multi-select via tap-to-toggle checkboxes; floating sticky pay-bar appears at bottom with running total + 'Pay Lump Sum' gradient button (calls POST /api/payments/pay-lump-sum). 'Select All' chip toggles all open invoices; 'Overdue (N)' chip auto-selects only overdue. Overdue rows have red left border + 'OVERDUE' pill. History tab shows paid invoices with green tick. Each row has 'View →' to open /invoice/[id]. Wired from: (1) Ledger hero 'Pay' button → /dist-invoices/{id}, (2) Distributor profile hero now has 5 action pills with new 'Bills' pill → /dist-invoices/{id}. Verified end-to-end via Playwright: select-all/clear-all toggle works, history tab loads paid invoices, hero metrics render correctly, lump-sum button shows accurate total."
 
+  - task: "Global error handling & inline form validation"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/Toast.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Built a comprehensive error/validation infrastructure:
+          1. **ApiError class** in `/app/frontend/src/api.ts` — parses FastAPI validation arrays (`detail: [{loc, msg}]`) into `fields: {fieldName: msg}` for inline display, handles network errors + timeouts (25s AbortController), auto-clears token on 401.
+          2. **Toast system** (`/app/frontend/src/components/Toast.tsx`) — singleton event emitter + animated `<ToastHost />` mounted in root `_layout.tsx`. APIs: `showError`, `showSuccess`, `showWarning`, `showInfo` with auto-dismiss + close button. Stacks up to 3 toasts.
+          3. **ErrorBoundary** (`/app/frontend/src/components/ErrorBoundary.tsx`) — catches render crashes anywhere in tree, shows friendly retry UI with error details (component stack in dev).
+          4. **Inline field validation** added to:
+             - `/auth/email.tsx`: live email regex; red border + `⚠ Enter a valid email like you@pharmacy.com` on blur; toast on API error.
+             - `/auth/otp.tsx`: red boxes + inline `⚠ Invalid OTP` text + toast on wrong code; resend errors via toast.
+             - `/auth/onboarding.tsx`: per-field touched-state validation for name (min 2 chars), phone (10 digits starting 6-9 — Indian mobile), GST (relaxed GSTIN regex). Errors clear when fixing.
+             - `/profile.tsx`: same rules as onboarding; surface server-side field errors.
+             - `/credit-note/new.tsx`: distributor pick required + amount > 0 + max 1Cr sanity check; submit button always tappable so user gets feedback (inline + toast) instead of silent disabled state. Notes char counter 0/500.
+             - `/templates.tsx`: name 3–60 char rule with inline error + toast on conflict; success toasts on save/load/delete.
+          5. **Toast-ified key API failures**: `cart.tsx` (load/optimize/swap/qty/remove/place-order), `search.tsx` (add-to-cart, scan permission/image errors), `dist-invoices/[id].tsx` (load + pay-lump-sum).
+          Verified via Playwright on mobile viewport: email invalid → red field + helper text; wrong OTP → red boxes + inline text + top toast; empty credit-note submit → both fields red + inline errors + "Cannot submit" toast; successful credit-note → green success toast + ledger updated.
+
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
