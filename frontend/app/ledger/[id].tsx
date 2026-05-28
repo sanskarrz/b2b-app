@@ -86,7 +86,8 @@ export default function Ledger() {
           <View style={styles.heroActions}>
             <TouchableOpacity
               style={styles.heroAction}
-              onPress={() => router.push("/(tabs)/payments")}
+              onPress={() => router.push(`/dist-invoices/${id}`)}
+              testID="ledger-pay"
             >
               <Ionicons name="card-outline" size={14} color="#FFF" />
               <Text style={styles.heroActionText}>Pay</Text>

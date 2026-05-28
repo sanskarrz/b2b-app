@@ -84,8 +84,9 @@ export default function DistributorProfile() {
           <View style={styles.heroActions}>
             <ActionPill icon="chatbubble" label="Chat" onPress={() => router.push(`/chat/${id}`)} />
             <ActionPill icon="receipt" label="Ledger" onPress={() => router.push(`/ledger/${id}`)} />
+            <ActionPill icon="document-text" label="Bills" onPress={() => router.push(`/dist-invoices/${id}`)} />
             <ActionPill icon="call" label="Call" onPress={() => Linking.openURL(`tel:${c.phone.replace(/\s/g, "")}`)} />
-            <ActionPill icon="logo-whatsapp" label="WhatsApp" onPress={() => Linking.openURL(`https://wa.me/${c.whatsapp.replace(/\D/g, "")}?text=Hi%20${encodeURIComponent(d.short_name)}`)} />
+            <ActionPill icon="logo-whatsapp" label="WApp" onPress={() => Linking.openURL(`https://wa.me/${c.whatsapp.replace(/\D/g, "")}?text=Hi%20${encodeURIComponent(d.short_name)}`)} />
           </View>
         </LinearGradient>
 

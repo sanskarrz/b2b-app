@@ -422,6 +422,18 @@
         agent: "main"
         comment: "GET /api/distributors/{id}/invoices returns {open_invoices, invoice_history, overdue, outstanding, credit_limit, credit_used, credit_used_pct}. UI screen for this pending — can use Ledger page for now."
 
+  - task: "Per-distributor Invoices UI with multi-select Pay Lump Sum"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/dist-invoices/[id].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "New screen /dist-invoices/[id] shows gradient hero with outstanding amount, overdue + open counts, in-hero Credit Used progress bar (color-coded green/amber/red). Two tabs: Open (N) and History (N). Open tab supports multi-select via tap-to-toggle checkboxes; floating sticky pay-bar appears at bottom with running total + 'Pay Lump Sum' gradient button (calls POST /api/payments/pay-lump-sum). 'Select All' chip toggles all open invoices; 'Overdue (N)' chip auto-selects only overdue. Overdue rows have red left border + 'OVERDUE' pill. History tab shows paid invoices with green tick. Each row has 'View →' to open /invoice/[id]. Wired from: (1) Ledger hero 'Pay' button → /dist-invoices/{id}, (2) Distributor profile hero now has 5 action pills with new 'Bills' pill → /dist-invoices/{id}. Verified end-to-end via Playwright: select-all/clear-all toggle works, history tab loads paid invoices, hero metrics render correctly, lump-sum button shows accurate total."
+
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
