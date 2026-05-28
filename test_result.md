@@ -362,6 +362,66 @@
         agent: "main"
         comment: "Added 'Smart Tools' section with Margin Calculator, Compare Distributors, Margin Analyzer, Smart Reorder Predictor."
 
+  - task: "Delivery Confirmation flow (critical) + Real Invoice Numbers + Auto Debit Notes on Short Supply"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/order/[id]/confirm-delivery.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "When pharmacist receives shipment: opens order → taps green 'Confirm Delivery' CTA. Screen lets edit qty_received per line (auto-flags as 'Short' if <ordered), edit free_qty (schemes), payment split (Paying Now / On Credit). Optional photo (required only on dispute toggle). Notes. On submit: order.status→'delivered', items updated with received qty/free/batch, credit_used adjusted if short. Auto-creates debit_note (reason='short-supply') for the missing value. Creates a 'due' payment row for credit portion. Idempotent (second confirm returns 400). 50/50 backend tests pass."
+
+  - task: "Real Distributor Invoice Numbers (F0XXXX-AXXXXXXX) + PDF/XLS download buttons"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/order/[id]/index.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Every order has a real distributor invoice number (e.g. F00526-A7235344). Order Detail page shows: invoice badge (top), PDF / XLS buttons (if has_bill_pdf=true, ~70% of distributors), or 'Bill not uploaded by distributor' warning pill. Items now show batch number + expiry date inline."
+
+  - task: "Pay Lump Sum (settle multiple invoices at once)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/payments/pay-lump-sum {payment_ids: [...]}. Marks all listed payments as paid + reduces respective distributor credit_used. Returns total_paid + count. Frontend per-distributor invoices screen still TODO."
+
+  - task: "Ledger CSV Export"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "GET /api/ledger/{distributor_id}/export?format=csv&days=N returns CSV with header rows (LEDGER EXPORT, distributor name, period), entries (Date/Type/Reference/Items/Debit/Credit/Status/Running Balance), and footer totals (Total Bills/Paid/Closing Balance). Frontend ledger screen has new 'Export CSV' button in the gradient hero that opens the CSV in a new window."
+
+  - task: "Per-distributor invoices endpoint (Open vs History)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "GET /api/distributors/{id}/invoices returns {open_invoices, invoice_history, overdue, outstanding, credit_limit, credit_used, credit_used_pct}. UI screen for this pending — can use Ledger page for now."
+
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================

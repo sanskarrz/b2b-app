@@ -1279,6 +1279,11 @@ async def search_comprehensive(q: str, user: dict = Depends(get_current_user)):
                 "mrp": pr.get("mrp", p["mrp"]),
                 "scheme": pr.get("scheme"),
                 "margin_pct": pr.get("margin_pct"),
+                "qty_available": pr.get("qty_available", 0),
+                "dist_discount_pct": pr.get("dist_discount_pct", 0),
+                "gst_pct": pr.get("gst_pct", 12.0),
+                "expiry": pr.get("expiry"),
+                "delivery_eta_hours": pr.get("delivery_eta_hours", 24),
             })
         offers.sort(key=lambda x: x["ptr"])
         lowest = offers[0] if offers else None

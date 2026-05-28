@@ -32,6 +32,10 @@ type Offer = {
   mrp: number;
   scheme?: string | null;
   margin_pct: number;
+  qty_available?: number;
+  dist_discount_pct?: number;
+  gst_pct?: number;
+  expiry?: string;
 };
 
 type Match = {
@@ -49,9 +53,12 @@ export default function Search() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
+  const [cart, setCart] = useState<{ count: number; total: number; items: any[] }>({ count: 0, total: 0, items: [] });
 
+  // Smart debounced search — minimum 2 chars + trim
   useEffect(() => {
-    if (!q.trim()) {
+    const trimmed = q.trim();
+    if (trimmed.length < 2) {
       setMatches([]);
       setAlternatives([]);
       setSearched(false);
@@ -61,15 +68,31 @@ export default function Search() {
     setSearched(true);
     const t = setTimeout(async () => {
       try {
-        const data = await api(`/search/comprehensive?q=${encodeURIComponent(q.trim())}`);
+        const data = await api(`/search/comprehensive?q=${encodeURIComponent(trimmed)}`);
         setMatches(data.matches || []);
         setAlternatives(data.alternatives || []);
+      } catch (e: any) {
+        // Silent fail — show empty state
+        setMatches([]);
+        setAlternatives([]);
       } finally {
         setLoading(false);
       }
     }, 250);
     return () => clearTimeout(t);
   }, [q]);
+
+  // Refresh cart summary
+  const refreshCart = async () => {
+    try {
+      const c = await api("/cart");
+      setCart(c);
+    } catch {}
+  };
+
+  useEffect(() => {
+    refreshCart();
+  }, []);
 
   const runScan = async (mode: "camera" | "library") => {
     try {
@@ -93,6 +116,11 @@ export default function Search() {
   };
 
   const addOffer = async (productId: string, offer: Offer) => {
+    // Validation: out of stock?
+    if (offer.qty_available != null && offer.qty_available <= 0) {
+      Alert.alert("Out of stock", `${offer.distributor_name} has 0 units of this medicine.`);
+      return;
+    }
     const key = `${productId}-${offer.distributor_id}`;
     setAdding(key);
     try {
@@ -100,8 +128,9 @@ export default function Search() {
         method: "POST",
         body: { product_id: productId, distributor_id: offer.distributor_id, qty: 1 },
       });
+      await refreshCart();
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      Alert.alert("Could not add", e.message || "Unknown error");
     } finally {
       setAdding(null);
     }
@@ -165,8 +194,35 @@ export default function Search() {
                 ⭐ {o.rating} • {o.delivery_time}
                 {o.scheme ? ` • ${o.scheme}` : ""}
               </Text>
+              {/* Rich offer row: qty + expiry + dist discount + GST */}
+              <View style={styles.metaRichRow}>
+                {o.qty_available != null && (
+                  <View style={styles.metaTag}>
+                    <Ionicons name="cube-outline" size={9} color={colors.textSecondary} />
+                    <Text style={styles.metaTagText}>{o.qty_available > 999 ? `${(o.qty_available / 1000).toFixed(1)}k` : o.qty_available} avl</Text>
+                  </View>
+                )}
+                {o.expiry && (
+                  <View style={styles.metaTag}>
+                    <Ionicons name="calendar-outline" size={9} color={colors.textSecondary} />
+                    <Text style={styles.metaTagText}>Exp {o.expiry}</Text>
+                  </View>
+                )}
+                {o.dist_discount_pct > 0 && (
+                  <View style={[styles.metaTag, { backgroundColor: colors.accentBg }]}>
+                    <Ionicons name="pricetag-outline" size={9} color={colors.accent} />
+                    <Text style={[styles.metaTagText, { color: colors.accent, fontWeight: "800" }]}>{o.dist_discount_pct}% off</Text>
+                  </View>
+                )}
+                {o.gst_pct != null && (
+                  <View style={styles.metaTag}>
+                    <Text style={styles.metaTagText}>GST {o.gst_pct}%</Text>
+                  </View>
+                )}
+              </View>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
                 <Text style={styles.ptr}>{formatINRFull(o.ptr)}</Text>
+                <Text style={styles.mrpStrike}>MRP {formatINRFull(o.mrp)}</Text>
                 <View style={styles.marginPill}>
                   <Text style={styles.marginPillText}>{o.margin_pct.toFixed(1)}% margin</Text>
                 </View>

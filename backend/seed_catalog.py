@@ -749,6 +749,16 @@ def _stable_hash_pct(seed: str) -> float:
     return int(h[:8], 16) / 0xFFFFFFFF
 
 
+def _stable_expiry(seed: str) -> str:
+    """Deterministic expiry date 8–24 months in the future."""
+    from datetime import datetime as _dt
+    months = int(8 + _stable_hash_pct(seed + "exp") * 16)
+    base = _dt.now()
+    year = base.year + (base.month - 1 + months) // 12
+    month = ((base.month - 1 + months) % 12) + 1
+    return _dt(year, month, 1).strftime("%b %Y")
+
+
 def build_products() -> List[dict]:
     """Expand catalog into individual SKU records with per-distributor prices."""
     products: List[dict] = []
@@ -790,6 +800,11 @@ def build_products() -> List[dict]:
                     "mrp": mrp,
                     "scheme": scheme,
                     "margin_pct": margin,
+                    "qty_available": int(80 + _stable_hash_pct(sku_id + did + "qty") * 3000),
+                    "dist_discount_pct": round(2 + _stable_hash_pct(sku_id + did + "disc") * 8, 1),
+                    "gst_pct": 12.0,
+                    "expiry": _stable_expiry(sku_id + did),
+                    "delivery_eta_hours": int(4 + _stable_hash_pct(sku_id + did + "del") * 20),
                 })
             # Best distributor = lowest PTR
             best = min(prices, key=lambda p: p["ptr"])
