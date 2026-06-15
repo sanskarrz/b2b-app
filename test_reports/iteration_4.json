@@ -1,0 +1,60 @@
+{
+  "summary": "RX Tech v5 — DISTRIBUTOR side end-to-end. Backend: 25/25 new distributor tests PASS in /app/backend/tests/test_distributor_flow.py (auth+switch-role, /distributor/me/customers with per-customer credit, /distributor/me/receivables with status filters, /distributor/payments/{pid}/record full+partial settlement reducing credit_used, customer detail with running-balance ledger, PATCH credit limit, credit-note/debit-note issuance with credit_used drop, connected-credit consistency, two-way chat threads/history/send) + 6/6 pharmacist regression PASS (dashboard, /payments/summary using customer_credit, distributors list, ledger, dist-invoices, /credit-notes). Total backend across all files: 64/67 PASS — the 3 failures in pre-existing test_rxtech_backend.py are unrelated (/api/distributors/{id} and /api/products?q= now require auth → 401 instead of 200/404, behavior change but not from distributor refactor). Frontend (mobile 390x844): all distributor screens (/d/home, /d/customers, /d/collections, /d/customer/cust-1, /d/messages, /d/messages/cust-1) render with REAL seeded data — Home shows KPIs (Pending 5 / Dispatched 1 / TODAY'S SALES ₹8,860 / OUTSTANDING ₹1,15,700), Collections/Customers/Messages quick tiles with unread badge=2, last-7-days bar chart, Top Customers list. Tab bar correctly has Home/Orders/Stock/Customers/Money/More. Collections shows ₹1,15,700 receivable + filter chips (Open/Overdue/Due/History) + Record buttons. Customer detail (cust-1) shows credit line ₹48,798 used / ₹1,26,202 available of ₹1,75,000 (confirms PATCH credit-limit from test persisted), Edit limit / Credit Note / Debit Note buttons, Open Invoice with Collect, and a full ledger with monotonic running balance. Messages list shows 4 threads with unread counts; thread page shows full chat history including the TEST_msg_* messages sent by the API test. CRITICAL UX GAP found: pharmacist (tabs)/more.tsx has NO 'Switch to Distributor' action — user cannot reach /d/* screens from the UI (they only render via direct URL after API switch-role). Deprecated packages detected: none, but pre-existing 'props.pointerEvents is deprecated' RN warning remains.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/distributors/{id}", "issue": "Now requires auth — older public test_rxtech_backend.py::TestCatalog::test_distributor_detail / test_distributor_404 fail with 401 instead of 200/404. Either re-allow anonymous read OR update legacy tests; new behaviour seems intentional."},
+      {"endpoint": "GET /api/products?q=", "issue": "Search variant now returns 401 in test_products_search; root list /api/products still works. Same auth-tightening as above."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "(tabs)/more.tsx", "issue": "MISSING 'Switch to Distributor' menu item — there is no UI affordance for the demo user to reach the distributor side. Backend /api/distributor/switch-role works; the corresponding pharmacist→distributor UI button must be added (mirror /d/more.tsx 'Switch to Pharmacist' banner).", "testID": "more-switch-distributor", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/d/home, /d/customers, /d/collections, /d/customer/[id], /d/messages/*", "issues": ["No testID attributes on any interactive element (Record, Edit limit, Credit Note, Debit Note, Collect, Chat, send message, filter chips, customer rows) — makes downstream automated UI testing brittle. Recommend adding testIDs: d-rec-payment-<pid>, d-edit-limit, d-credit-note, d-debit-note, d-collect-<pid>, d-chip-<status>, d-customer-row-<id>, d-chat-send, d-chat-input."]}
+    ],
+    "react_native_issues": [
+      {"component": "(root layout)", "issue": "Pre-existing console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — still emitted on every navigation (same as iterations 1-3)."},
+      {"component": "(tabs) _layout", "issue": "Pre-existing console warning: 'No route named \"order/[id]\" exists in nested children' — Expo Router complains about a hidden route entry; cosmetic but should be cleaned up."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_distributor_flow.py",
+    "/app/backend/tests/test_rxtech_backend.py",
+    "/app/backend/tests/test_v4_features.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_distributor.xml",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "HIGH: Add a 'Switch to Distributor' entry in /app/frontend/app/(tabs)/more.tsx that POSTs /api/distributor/switch-role {role:'distributor'} and routes to /d/home. Currently the entire distributor side is unreachable from the pharmacist UI.",
+    "MED: Add testID props to all interactive elements on /d/home, /d/customers, /d/collections, /d/customer/[id], /d/messages/index, /d/messages/[id] to enable robust automated testing.",
+    "LOW: Decide whether GET /api/distributors/{id} and search /api/products?q= should remain auth-protected; if intentional, update legacy tests in test_rxtech_backend.py (lines 162-186).",
+    "LOW: Fix the Expo Router 'order/[id]' nested-children warning emitted on every page (root _layout register).",
+    "LOW: Resolve the 'props.pointerEvents is deprecated' warning by updating to style.pointerEvents (likely in a shared TopBar/Modal component)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 3431 lines (was 1005 in v4) — modularisation into routers (auth, catalog, cart, orders, payments, reports, distributor, chat, credit) is overdue and the >700-line threshold is breached significantly. Functional but maintenance risk grows.",
+    "Per-customer credit refactor is clean: cc_get/cc_inc helpers centralise the customer_credit upsert, and both pharmacist /payments/summary and distributor /distributor/me/customers read the SAME (distributor_id,user_id) record — confirmed via test_credit_internally_consistent.",
+    "POST /distributor/payments/{pid}/record correctly clamps amount to remaining (round(min(amt, remaining))), calls cc_inc(-amt) BEFORE the status flip, and for partial pays splits the original invoice into a remaining-due + a new -PART paid record. Math verified end-to-end in test_partial_then_full_payment_reduces_credit_used.",
+    "Credit-note/debit-note: only credit-note calls cc_inc(-amount); debit-note correctly does NOT touch credit_used (interest/penalty is not extended credit). Verified.",
+    "/distributor/me/chat history correctly marks user-sent messages read on GET (test_history_marks_user_msgs_read passes — unread drops to 0 on subsequent thread fetch).",
+    "Frontend distributor screens render React Native components only (View/Text/TouchableOpacity), no raw text leaks; chart bars compute height from max correctly; ledger entries are pre-sorted server-side with running_balance per entry — no client-side math.",
+    "MAJOR UX BUG: pharmacist→distributor switch button is missing from (tabs)/more.tsx (only the reverse direction exists in /d/more.tsx)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_distributor_flow.py (NEW — 25 tests across 9 test classes covering all new distributor endpoints + pharmacist regression)",
+    "/app/backend/tests/conftest.py (updated BASE_URL default to pharmacy-b2b preview host)"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25) on new distributor flow; 95.5% (64/67) across all backend test files — 3 failures are unrelated pre-existing public-catalog tests vs new auth requirement",
+    "frontend": "All 6 distributor screens render with real data and correct KPIs; main blocker is missing 'Switch to Distributor' menu entry (cannot reach screens from pharmacist UI)"
+  },
+  "seed_data_creation": "Used existing seeds (demo@rxtech.com → dist-1 with cust-1..cust-4). Tests created small TEST_ artifacts: 1 credit-note (₹1234 on cust-1, reduces credit_used by 1234), 1 debit-note (₹500 penalty on cust-1), 3 TEST_msg_* chat messages on cust-1 thread, 1 INV-*-PART payment record, raised cust-2 credit_limit to ₹175000. All idempotent on next run.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Distributor backend is solid — re-run /app/backend/tests/test_distributor_flow.py after any further changes. Frontend screens to verify after the 'Switch to Distributor' button is added: from pharmacist /(tabs)/more → tap Switch → expect to land on /d/home with same demo token (role-switched). Other distributor flows (Record Payment modal, Edit limit modal, Credit Note modal, Chat send) already render correctly via direct URL and call the right backend endpoints — only need a single end-to-end UI exercise after the switch button is in place. The 3 pre-existing test_rxtech_backend.py catalog failures are pre-existing and unrelated to this iteration.",
+  "rca_of_issue": "Issue 1 (CRITICAL UX): 'Switch to Distributor' was implemented only in the distributor-side More tab (/d/more.tsx → 'Switch to Pharmacist mode'), but the corresponding pharmacist-side action in /(tabs)/more.tsx was omitted. Reproduction: login as demo@rxtech.com → go to More tab → no Switch-to-Distributor entry visible. Mitigation: add an ItemDef in the Account section of /(tabs)/more.tsx that calls api('/distributor/switch-role', {method:'POST', body:{role:'distributor'}}) then router.replace('/d/home'). Issue 2 (minor regression): pre-existing public catalog endpoints now require auth — either revert to public or update legacy tests."
+}

@@ -39,9 +39,16 @@ export default function DLayout() {
         options={{ tabBarIcon: ({ focused }) => <Tab name="Customers" icon="people" focused={focused} /> }}
       />
       <Tabs.Screen
+        name="collections"
+        options={{ tabBarIcon: ({ focused }) => <Tab name="Money" icon="cash" focused={focused} /> }}
+      />
+      <Tabs.Screen
         name="more"
         options={{ tabBarIcon: ({ focused }) => <Tab name="More" icon="grid" focused={focused} /> }}
       />
+      <Tabs.Screen name="customer/[id]" options={{ href: null }} />
+      <Tabs.Screen name="messages/index" options={{ href: null }} />
+      <Tabs.Screen name="messages/[id]" options={{ href: null }} />
     </Tabs>
   );
 }

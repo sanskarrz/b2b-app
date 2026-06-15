@@ -414,6 +414,7 @@ async def verify_otp(payload: VerifyOTPRequest):
     # Seed sample data ONLY for the demo account — all other users start empty (real)
     if email == DEMO_EMAIL:
         await seed_user_data(user["id"])
+        await seed_demo_user_credit(user["id"])
 
     return {"success": True, "token": token, "user": user, "onboarded": user.get("onboarded", False)}
 
@@ -457,13 +458,19 @@ async def dashboard(user: dict = Depends(get_current_user)):
 
     deliveries = [o for o in today_orders if o["status"] in ("placed", "processing", "shipped") and o.get("eta")]
 
-    # Pick the worst-utilized distributor as the credit-warning subject
-    all_dists = await db.distributors.find({}, {"_id": 0}).to_list(50)
-    worst = max(
-        all_dists,
-        key=lambda d: (d.get("credit_used", 0) / max(d.get("credit_limit", 1), 1)),
+    # Pick the worst-utilized credit line (for THIS user) as the warning subject
+    cc_rows = await user_credit_rows(uid)
+    worst_cc = max(
+        cc_rows,
+        key=lambda c: (c.get("credit_used", 0) / max(c.get("credit_limit", 1), 1)),
         default=None,
     )
+    worst = None
+    if worst_cc:
+        wd = await db.distributors.find_one({"id": worst_cc["distributor_id"]}, {"_id": 0})
+        if wd:
+            worst = {"id": wd["id"], "short_name": wd["short_name"],
+                     "credit_used": round(worst_cc.get("credit_used", 0), 2), "credit_limit": worst_cc.get("credit_limit", 0)}
     credit_pct = round((worst["credit_used"] / worst["credit_limit"]) * 100) if worst and worst["credit_limit"] else 0
 
     return {
@@ -788,12 +795,13 @@ async def place_order(payment_method: str = "cash", distributor_id: Optional[str
                 "batch": batch_id,
                 "expiry": exp.strftime("%b %Y"),
             })
-        # If credit, check + deduct distributor credit limit
+        # If credit, check + deduct the customer's credit line with this distributor
         if pm == "credit" and d:
-            available = (d.get("credit_limit", 0) - d.get("credit_used", 0))
+            cc = await cc_get(dist_id, user["id"])
+            available = (cc.get("credit_limit", 0) - cc.get("credit_used", 0))
             if total > available:
                 raise HTTPException(400, f"Credit insufficient with {d['short_name']}: ₹{available:.0f} available, ₹{total:.0f} required")
-            await db.distributors.update_one({"id": dist_id}, {"$inc": {"credit_used": total}})
+            await cc_inc(dist_id, user["id"], total)
         # Real distributor invoice number (mimics F022526-A00XXXXX format)
         inv_num = f"F0{datetime.now().strftime('%m%y')}-A{random.randint(1000000, 9999999)}"
         order = {
@@ -882,8 +890,9 @@ async def payment_summary_v1(user: dict = Depends(get_current_user)):
         p["amount"] for p in payments
         if p["status"] == "paid" and p.get("paid_at") and (now_utc() - datetime.fromisoformat(p["paid_at"].replace("Z", "+00:00"))).days <= 30
     )
-    total_credit_taken = sum(d.get("credit_used", 0) for d in distributors)
-    total_credit_limit = sum(d.get("credit_limit", 0) for d in distributors)
+    _ccr = await db.customer_credit.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
+    total_credit_taken = sum(c.get("credit_used", 0) for c in _ccr)
+    total_credit_limit = sum(c.get("credit_limit", 0) for c in _ccr)
 
     today = now_utc()
     this_week = next_week = this_month = 0.0
@@ -1031,10 +1040,7 @@ async def approve_return(return_id: str, user: dict = Depends(get_current_user))
     if cn and cn.get("status") == "pending":
         await db.credit_notes.update_one({"id": cn["id"]}, {"$set": {"status": "issued"}})
         if cn.get("distributor_id"):
-            await db.distributors.update_one(
-                {"id": cn["distributor_id"]},
-                {"$inc": {"credit_used": -cn["amount"]}},
-            )
+            await cc_inc(cn["distributor_id"], user["id"], -cn["amount"])
     return {"success": True}
 
 
@@ -1473,8 +1479,9 @@ async def payment_summary(user: dict = Depends(get_current_user)):
         p["amount"] for p in payments
         if p["status"] == "paid" and p.get("paid_at") and (now_utc() - datetime.fromisoformat(p["paid_at"].replace("Z", "+00:00"))).days <= 30
     )
-    total_credit_taken = sum(d.get("credit_used", 0) for d in distributors)
-    total_credit_limit = sum(d.get("credit_limit", 0) for d in distributors)
+    _ccr = await db.customer_credit.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
+    total_credit_taken = sum(c.get("credit_used", 0) for c in _ccr)
+    total_credit_limit = sum(c.get("credit_limit", 0) for c in _ccr)
 
     # Upcoming dues schedule: this week / next week / this month
     today = now_utc()
@@ -1975,12 +1982,9 @@ async def pay_lump_sum(req: PayLumpSumReq, user: dict = Depends(get_current_user
             {"id": pid},
             {"$set": {"status": "paid", "paid_at": iso(now_utc())}},
         )
-        # Reduce credit_used for the distributor
+        # Reduce credit_used on the customer's credit line
         if p.get("distributor_id"):
-            await db.distributors.update_one(
-                {"id": p["distributor_id"]},
-                {"$inc": {"credit_used": -p["amount"]}},
-            )
+            await cc_inc(p["distributor_id"], user["id"], -p["amount"])
         total_paid += p["amount"]
     return {"success": True, "count": len(req.payment_ids), "total_paid": round(total_paid, 2)}
 
@@ -2001,15 +2005,18 @@ async def distributor_invoices(dist_id: str, user: dict = Depends(get_current_us
     history = [p for p in payments if p["status"] == "paid"]
     overdue_total = sum(p["amount"] for p in open_inv if p["status"] == "overdue")
     outstanding = sum(p["amount"] for p in open_inv)
+    _cc = await cc_get(dist_id, user["id"])
+    _lim = _cc.get("credit_limit", 0)
+    _used = round(_cc.get("credit_used", 0), 2)
     return {
         "distributor": d,
         "open_invoices": open_inv,
         "invoice_history": history,
         "overdue": round(overdue_total, 2),
         "outstanding": round(outstanding, 2),
-        "credit_limit": d.get("credit_limit", 0),
-        "credit_used": d.get("credit_used", 0),
-        "credit_used_pct": round((d.get("credit_used", 0) / max(d.get("credit_limit", 1), 1)) * 100, 1),
+        "credit_limit": _lim,
+        "credit_used": _used,
+        "credit_used_pct": round((_used / max(_lim, 1)) * 100, 1),
     }
 
 
@@ -2156,7 +2163,8 @@ async def get_ledger(distributor_id: str, user: dict = Depends(get_current_user)
     total_credit_notes = sum(c["amount"] for c in credit_notes)
     total_debit_notes = sum(d["amount"] for d in debit_notes)
     closing_balance = round(running, 2)
-    credit_available = (dist.get("credit_limit", 0) - dist.get("credit_used", 0))
+    _cc = await cc_get(distributor_id, user["id"])
+    credit_available = (_cc.get("credit_limit", 0) - _cc.get("credit_used", 0))
 
     return {
         "distributor": dist,
@@ -2168,9 +2176,9 @@ async def get_ledger(distributor_id: str, user: dict = Depends(get_current_user)
             "credit_notes": round(total_credit_notes, 2),
             "debit_notes": round(total_debit_notes, 2),
             "closing_balance": closing_balance,
-            "credit_limit": dist.get("credit_limit", 0),
-            "credit_used": dist.get("credit_used", 0),
-            "credit_available": credit_available,
+            "credit_limit": _cc.get("credit_limit", 0),
+            "credit_used": round(_cc.get("credit_used", 0), 2),
+            "credit_available": round(credit_available, 2),
         },
         "entries": entries,
     }
@@ -2203,12 +2211,9 @@ async def create_credit_note(req: CreditNoteReq, user: dict = Depends(get_curren
         "created_at": iso(now_utc()),
     }
     await db.credit_notes.insert_one({**cn})
-    # If credit note offsets credit-used, reduce it
+    # If credit note offsets credit-used, reduce the customer's credit line
     if req.amount > 0:
-        await db.distributors.update_one(
-            {"id": req.distributor_id},
-            {"$inc": {"credit_used": -req.amount}},
-        )
+        await cc_inc(req.distributor_id, user["id"], -req.amount)
     return {"success": True, "item": cn}
 
 
@@ -2445,6 +2450,168 @@ async def health():
 import secrets as _secrets
 
 
+# ============================================================================
+# PER-CUSTOMER CREDIT ENGINE
+# Credit is tracked per (distributor_id, user_id) pair in `customer_credit`.
+# Both the pharmacist view ("my credit with distributor X") and the distributor
+# view ("credit I extended to pharmacy Y") read from the SAME record, so the two
+# sides of the marketplace always stay in sync.
+# ============================================================================
+async def cc_get(distributor_id: str, user_id: str) -> dict:
+    """Return the per-customer credit record, lazily creating it from the
+    distributor's default terms if it does not exist yet."""
+    cc = await db.customer_credit.find_one(
+        {"distributor_id": distributor_id, "user_id": user_id}, {"_id": 0}
+    )
+    if cc:
+        return cc
+    d = await db.distributors.find_one({"id": distributor_id}, {"_id": 0}) or {}
+    cc = {
+        "id": str(uuid.uuid4()),
+        "distributor_id": distributor_id,
+        "user_id": user_id,
+        "credit_limit": int(d.get("credit_limit", 100000)),
+        "credit_used": 0.0,
+        "credit_days": int(d.get("credit_days", 21)),
+        "settlement_discount_pct": float(d.get("settlement_discount_pct", 1.5)),
+        "updated_at": iso(now_utc()),
+    }
+    await db.customer_credit.insert_one({**cc})
+    cc.pop("_id", None)
+    return cc
+
+
+async def cc_inc(distributor_id: str, user_id: str, delta: float) -> None:
+    """Increment (or decrement, if delta<0) credit_used for a customer, never
+    going below zero."""
+    cc = await cc_get(distributor_id, user_id)
+    new_used = max(0.0, round((cc.get("credit_used", 0) or 0) + delta, 2))
+    await db.customer_credit.update_one(
+        {"distributor_id": distributor_id, "user_id": user_id},
+        {"$set": {"credit_used": new_used, "updated_at": iso(now_utc())}},
+    )
+
+
+async def user_credit_rows(user_id: str) -> List[dict]:
+    return await db.customer_credit.find({"user_id": user_id}, {"_id": 0}).to_list(200)
+
+
+async def seed_demo_user_credit(user_id: str) -> None:
+    """Seed customer_credit records for the demo pharmacist mirroring the demo
+    distributors' outstanding so the existing demo numbers carry over to the
+    new per-customer model."""
+    if await db.customer_credit.count_documents({"user_id": user_id}) > 0:
+        return
+    dists = await db.distributors.find({}, {"_id": 0}).to_list(50)
+    base = now_utc()
+    for d in dists:
+        await db.customer_credit.insert_one({
+            "id": str(uuid.uuid4()),
+            "distributor_id": d["id"],
+            "user_id": user_id,
+            "credit_limit": int(d.get("credit_limit", 100000)),
+            "credit_used": float(d.get("credit_used", 0)),
+            "credit_days": int(d.get("credit_days", 21)),
+            "settlement_discount_pct": float(d.get("settlement_discount_pct", 1.5)),
+            "updated_at": iso(base),
+        })
+
+
+# ============================================================================
+# DEMO DISTRIBUTOR DATA — pharmacy customers buying from dist-1 so the
+# distributor-side app (orders / customers / collections / chat) looks alive.
+# ============================================================================
+DEMO_DIST_ID = "dist-1"
+
+
+def _mk_order(user_id, code, dist_id, dist_name, items, status, pm, created_at, **extra):
+    total = round(sum(i["price"] * i["qty"] for i in items), 2)
+    o = {
+        "id": str(uuid.uuid4()), "code": code,
+        "invoice_number": f"F0{datetime.now().strftime('%m%y')}-A{random.randint(1000000, 9999999)}",
+        "user_id": user_id, "items": items, "distributor_id": dist_id,
+        "distributor_name": dist_name, "sku_count": len(items), "total": total,
+        "status": status, "payment_method": pm, "created_at": created_at,
+        "eta": None, "delivery_confirmed": status == "delivered",
+        "has_bill_pdf": True, "amount_paid_on_delivery": total if (pm == "cash" and status == "delivered") else 0,
+        "amount_on_credit": total if pm == "credit" else 0,
+    }
+    o.update(extra)
+    return o
+
+
+def _it(pid, name, qty, price, mrp):
+    return {"product_id": pid, "name": name, "qty_ordered": qty, "qty": qty, "free_qty": 0,
+            "price": price, "mrp": mrp, "discount_pct": 4.0, "gst_pct": 12.0,
+            "batch": f"B{random.randint(1000, 9999)}A", "expiry": "Jun 2027"}
+
+
+async def seed_distributor_demo() -> None:
+    """Idempotent seed of demo pharmacy customers for dist-1."""
+    if await db.users.find_one({"id": "cust-1"}):
+        return
+    base = now_utc()
+    customers = [
+        {"id": "cust-1", "shop": "Apollo Medical Store", "name": "Ramesh Kumar", "phone": "9820011223", "addr": "Andheri West, Mumbai", "gst": "27APOLL1234A1Z5", "dl": "MH-MUM-20-110021", "limit": 150000, "used": 96500},
+        {"id": "cust-2", "shop": "Wellness Pharmacy", "name": "Sneha Patil", "phone": "9820033445", "addr": "Bandra East, Mumbai", "gst": "27WELLP5678B1Z3", "dl": "MH-MUM-21-110874", "limit": 100000, "used": 38200},
+        {"id": "cust-3", "shop": "City Care Chemist", "name": "Imran Shaikh", "phone": "9820055667", "addr": "Dadar West, Mumbai", "gst": "27CITYC9012C1Z1", "dl": "MH-MUM-19-109233", "limit": 80000, "used": 71200},
+        {"id": "cust-4", "shop": "Guardian Pharmacy", "name": "Anita Desai", "phone": "9820077889", "addr": "Powai, Mumbai", "gst": "27GUARD3456D1Z9", "dl": "MH-MUM-22-112987", "limit": 60000, "used": 0},
+    ]
+    dn = "ABC Pharma"
+    for c in customers:
+        await db.users.insert_one({
+            "id": c["id"], "email": f"{c['id']}@pharmacy.demo", "name": c["name"],
+            "phone": c["phone"], "shop_name": c["shop"], "gst": c["gst"], "address": c["addr"],
+            "drug_license": c["dl"], "food_license": None, "onboarded": True,
+            "created_at": iso(base - timedelta(days=140)), "roles": ["pharmacist"], "owned_distributor_id": None,
+        })
+        await db.customer_credit.insert_one({
+            "id": str(uuid.uuid4()), "distributor_id": DEMO_DIST_ID, "user_id": c["id"],
+            "credit_limit": c["limit"], "credit_used": float(c["used"]),
+            "credit_days": 21, "settlement_discount_pct": 1.5, "updated_at": iso(base),
+        })
+
+    n = 5200
+    orders = [
+        # cust-1: a brand new order awaiting acceptance + one dispatched + one delivered
+        _mk_order("cust-1", f"ORD-{n}", DEMO_DIST_ID, dn, [_it("p-1", "Azithromycin 500mg", 40, 54.20, 78.50), _it("p-7", "Atorvastatin 10mg", 30, 78.00, 110.00)], "placed", "credit", iso(base - timedelta(hours=2))),
+        _mk_order("cust-1", f"ORD-{n+1}", DEMO_DIST_ID, dn, [_it("p-4", "Amlodipine 5mg", 50, 40.80, 56.00)], "dispatched", "credit", iso(base - timedelta(days=1)), dispatched_at=iso(base - timedelta(hours=20))),
+        _mk_order("cust-1", f"ORD-{n+2}", DEMO_DIST_ID, dn, [_it("p-9", "Amoxicillin 500mg", 60, 66.00, 92.00)], "delivered", "cash", iso(base - timedelta(days=6)), delivered_at=iso(base - timedelta(days=6))),
+        # cust-2: accepted (credit) + delivered (credit)
+        _mk_order("cust-2", f"ORD-{n+3}", DEMO_DIST_ID, dn, [_it("p-10", "Losartan 50mg", 35, 62.30, 88.00)], "accepted", "credit", iso(base - timedelta(hours=8))),
+        _mk_order("cust-2", f"ORD-{n+4}", DEMO_DIST_ID, dn, [_it("p-3", "Metformin 500mg", 80, 26.40, 38.00)], "delivered", "credit", iso(base - timedelta(days=9)), delivered_at=iso(base - timedelta(days=9))),
+        # cust-3: a new order + heavy outstanding
+        _mk_order("cust-3", f"ORD-{n+5}", DEMO_DIST_ID, dn, [_it("p-1", "Azithromycin 500mg", 25, 54.20, 78.50)], "placed", "credit", iso(base - timedelta(hours=5))),
+        _mk_order("cust-3", f"ORD-{n+6}", DEMO_DIST_ID, dn, [_it("p-7", "Atorvastatin 10mg", 40, 78.00, 110.00)], "delivered", "credit", iso(base - timedelta(days=20)), delivered_at=iso(base - timedelta(days=20))),
+        # cust-4: a cash order
+        _mk_order("cust-4", f"ORD-{n+7}", DEMO_DIST_ID, dn, [_it("p-4", "Amlodipine 5mg", 20, 40.80, 56.00)], "placed", "cash", iso(base - timedelta(hours=1))),
+    ]
+    await db.orders.insert_many([{**o} for o in orders])
+
+    payments = [
+        # cust-1 outstanding ~96.5k
+        {"id": str(uuid.uuid4()), "user_id": "cust-1", "distributor_id": DEMO_DIST_ID, "distributor_name": dn, "invoice_code": "INV-20051", "amount": 54500.00, "due_date": iso(base + timedelta(days=8)), "status": "due", "days_to_due": 8},
+        {"id": str(uuid.uuid4()), "user_id": "cust-1", "distributor_id": DEMO_DIST_ID, "distributor_name": dn, "invoice_code": "INV-20040", "amount": 42000.00, "due_date": iso(base - timedelta(days=3)), "status": "overdue", "days_to_due": -3},
+        {"id": str(uuid.uuid4()), "user_id": "cust-1", "distributor_id": DEMO_DIST_ID, "distributor_name": dn, "invoice_code": "INV-19980", "amount": 31000.00, "due_date": iso(base - timedelta(days=30)), "status": "paid", "days_to_due": -30, "paid_at": iso(base - timedelta(days=28))},
+        # cust-2 outstanding ~38.2k
+        {"id": str(uuid.uuid4()), "user_id": "cust-2", "distributor_id": DEMO_DIST_ID, "distributor_name": dn, "invoice_code": "INV-20055", "amount": 38200.00, "due_date": iso(base + timedelta(days=14)), "status": "due", "days_to_due": 14},
+        {"id": str(uuid.uuid4()), "user_id": "cust-2", "distributor_id": DEMO_DIST_ID, "distributor_name": dn, "invoice_code": "INV-19920", "amount": 22400.00, "due_date": iso(base - timedelta(days=25)), "status": "paid", "days_to_due": -25, "paid_at": iso(base - timedelta(days=24))},
+        # cust-3 outstanding ~71.2k, mostly overdue
+        {"id": str(uuid.uuid4()), "user_id": "cust-3", "distributor_id": DEMO_DIST_ID, "distributor_name": dn, "invoice_code": "INV-20030", "amount": 48200.00, "due_date": iso(base - timedelta(days=12)), "status": "overdue", "days_to_due": -12},
+        {"id": str(uuid.uuid4()), "user_id": "cust-3", "distributor_id": DEMO_DIST_ID, "distributor_name": dn, "invoice_code": "INV-20060", "amount": 23000.00, "due_date": iso(base + timedelta(days=5)), "status": "due", "days_to_due": 5},
+    ]
+    await db.payments.insert_many(payments)
+
+    chats = [
+        {"id": str(uuid.uuid4()), "user_id": "cust-1", "distributor_id": DEMO_DIST_ID, "sender": "user", "message": "Need 40 strips Azithral urgently, can you dispatch today?", "read": False, "created_at": iso(base - timedelta(hours=2))},
+        {"id": str(uuid.uuid4()), "user_id": "cust-2", "distributor_id": DEMO_DIST_ID, "sender": "user", "message": "What scheme is running on Metformin this week?", "read": False, "created_at": iso(base - timedelta(hours=8))},
+        {"id": str(uuid.uuid4()), "user_id": "cust-3", "distributor_id": DEMO_DIST_ID, "sender": "user", "message": "Please share the updated ledger statement.", "read": False, "created_at": iso(base - timedelta(hours=5))},
+    ]
+    await db.chat_messages.insert_many(chats)
+    logger.info("Seeded distributor demo: 4 pharmacy customers + orders/payments/credit/chat")
+
+
+
 async def get_owned_distributor(user: dict) -> dict:
     """Return the Distributor record owned by this user, or 403."""
     did = user.get("owned_distributor_id")
@@ -2521,7 +2688,7 @@ async def distributor_dashboard(user: dict = Depends(get_current_user)):
 
     # Outstanding (credit owed by all customers to this distributor)
     outstanding_agg = await db.payments.aggregate([
-        {"$match": {"distributor_id": d["id"], "status": {"$in": ["pending", "overdue"]}}},
+        {"$match": {"distributor_id": d["id"], "status": {"$in": ["due", "overdue"]}}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
     ]).to_list(1)
     outstanding = outstanding_agg[0] if outstanding_agg else {"total": 0, "count": 0}
@@ -2550,6 +2717,11 @@ async def distributor_dashboard(user: dict = Depends(get_current_user)):
         "prices": {"$elemMatch": {"distributor_id": d["id"], "qty_available": 0}},
     })
 
+    # Total credit extended to all customers of this distributor
+    _ccr = await db.customer_credit.find({"distributor_id": d["id"]}, {"_id": 0}).to_list(500)
+    _dist_cc_limit = sum(c.get("credit_limit", 0) for c in _ccr)
+    _dist_cc_used = round(sum(c.get("credit_used", 0) for c in _ccr), 2)
+
     return {
         "distributor": d,
         "pending_orders": pending,
@@ -2562,8 +2734,8 @@ async def distributor_dashboard(user: dict = Depends(get_current_user)):
         "top_customers": top_customers,
         "low_stock": low_stock,
         "out_of_stock": out_of_stock,
-        "credit_limit": d.get("credit_limit", 0),
-        "credit_used": d.get("credit_used", 0),
+        "credit_limit": _dist_cc_limit,
+        "credit_used": _dist_cc_used,
     }
 
 
@@ -2739,16 +2911,20 @@ async def distributor_customers(
     users = {u["id"]: u for u in await db.users.find({"id": {"$in": user_ids}}, {"_id": 0}).to_list(500)}
     # Outstanding per user (sum of pending payments to this distributor)
     pay_agg = await db.payments.aggregate([
-        {"$match": {"distributor_id": d["id"], "status": {"$in": ["pending", "overdue"]}}},
+        {"$match": {"distributor_id": d["id"], "status": {"$in": ["due", "overdue"]}}},
         {"$group": {"_id": "$user_id", "outstanding": {"$sum": "$amount"}, "overdue_count": {"$sum": {"$cond": [{"$eq": ["$status", "overdue"]}, 1, 0]}}}},
     ]).to_list(500)
     pay_map = {p["_id"]: p for p in pay_agg}
+    cc_map = {c["user_id"]: c for c in await db.customer_credit.find({"distributor_id": d["id"]}, {"_id": 0}).to_list(500)}
     rows = []
     for r in agg:
         u = users.get(r["_id"])
         if not u:
             continue
         pay = pay_map.get(r["_id"], {"outstanding": 0, "overdue_count": 0})
+        cc = cc_map.get(r["_id"]) or {}
+        c_lim = cc.get("credit_limit", 0)
+        c_used = round(cc.get("credit_used", 0), 2)
         rows.append({
             "user_id": r["_id"],
             "name": u.get("shop_name") or u.get("name") or u.get("email"),
@@ -2763,6 +2939,10 @@ async def distributor_customers(
             "last_order_at": r["last_order_at"],
             "outstanding": pay["outstanding"],
             "overdue_count": pay["overdue_count"],
+            "credit_limit": c_lim,
+            "credit_used": c_used,
+            "credit_available": round(c_lim - c_used, 2),
+            "credit_used_pct": round((c_used / max(c_lim, 1)) * 100, 1),
         })
     if q:
         qq = q.lower()
@@ -2921,6 +3101,312 @@ async def erp_get_inventory(d: dict = Depends(get_erp_distributor)):
     return {"count": len(rows), "items": rows}
 
 
+
+# ============================================================================
+# DISTRIBUTOR — COLLECTIONS / RECEIVABLES (money owed by customers)
+# ============================================================================
+@api_router.get("/distributor/me/receivables")
+async def distributor_receivables(
+    status: Optional[str] = None,  # 'due' | 'overdue' | 'paid' | None(open)
+    q: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    d = await get_owned_distributor(user)
+    payments = await db.payments.find({"distributor_id": d["id"]}, {"_id": 0}).sort("due_date", 1).to_list(1000)
+    # enrich with customer name
+    uids = list({p["user_id"] for p in payments})
+    users = {u["id"]: u for u in await db.users.find({"id": {"$in": uids}}, {"_id": 0}).to_list(500)}
+    for p in payments:
+        u = users.get(p["user_id"]) or {}
+        p["customer_name"] = u.get("shop_name") or u.get("name") or u.get("email") or "—"
+        p["customer_phone"] = u.get("phone")
+
+    open_pays = [p for p in payments if p["status"] in ("due", "overdue")]
+    paid_pays = [p for p in payments if p["status"] == "paid"]
+    total_outstanding = round(sum(p["amount"] for p in open_pays), 2)
+    total_overdue = round(sum(p["amount"] for p in open_pays if p["status"] == "overdue"), 2)
+    # collected in last 30 days
+    collected_30d = round(sum(
+        p["amount"] for p in paid_pays
+        if p.get("paid_at") and (now_utc() - datetime.fromisoformat(p["paid_at"].replace("Z", "+00:00"))).days <= 30
+    ), 2)
+    # due this week
+    today = now_utc()
+    due_week = 0.0
+    for p in open_pays:
+        try:
+            diff = (datetime.fromisoformat(p["due_date"].replace("Z", "+00:00")).date() - today.date()).days
+            if 0 <= diff <= 7:
+                due_week += p["amount"]
+        except Exception:
+            pass
+
+    if status == "paid":
+        rows = paid_pays
+    elif status in ("due", "overdue"):
+        rows = [p for p in open_pays if p["status"] == status]
+    else:
+        rows = open_pays
+    if q:
+        qq = q.lower()
+        rows = [p for p in rows if qq in (p.get("customer_name", "").lower()) or qq in (p.get("invoice_code", "").lower())]
+
+    return {
+        "summary": {
+            "total_outstanding": total_outstanding,
+            "total_overdue": total_overdue,
+            "collected_30d": collected_30d,
+            "due_this_week": round(due_week, 2),
+            "open_count": len(open_pays),
+            "overdue_count": len([p for p in open_pays if p["status"] == "overdue"]),
+        },
+        "items": rows,
+    }
+
+
+class RecordPaymentReq(BaseModel):
+    amount: Optional[float] = None   # if omitted → full settlement
+    method: Optional[str] = "cash"   # cash | upi | cheque | neft
+
+
+@api_router.post("/distributor/payments/{pid}/record")
+async def distributor_record_payment(pid: str, req: RecordPaymentReq, user: dict = Depends(get_current_user)):
+    """Record a collection (full or partial) from a customer. Reduces the
+    customer's credit_used and settles / part-settles the invoice — reflected on
+    the pharmacist side instantly."""
+    d = await get_owned_distributor(user)
+    p = await db.payments.find_one({"id": pid, "distributor_id": d["id"]}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Invoice not found")
+    if p["status"] == "paid":
+        raise HTTPException(400, "Invoice already settled")
+    remaining = round(p["amount"], 2)
+    amt = round(min(req.amount if req.amount and req.amount > 0 else remaining, remaining), 2)
+    if amt <= 0:
+        raise HTTPException(400, "Amount must be greater than zero")
+    method = (req.method or "cash").lower()
+    cust = p["user_id"]
+    await cc_inc(d["id"], cust, -amt)
+    fully = amt >= remaining
+    if fully:
+        await db.payments.update_one(
+            {"id": pid},
+            {"$set": {"status": "paid", "paid_at": iso(now_utc()), "pay_method": method}},
+        )
+    else:
+        # reduce the open invoice, log the collected portion as a separate paid record
+        await db.payments.update_one({"id": pid}, {"$set": {"amount": round(remaining - amt, 2)}})
+        await db.payments.insert_one({
+            "id": str(uuid.uuid4()), "user_id": cust, "distributor_id": d["id"],
+            "distributor_name": p.get("distributor_name", d["short_name"]),
+            "invoice_code": f"{p['invoice_code']}-PART", "amount": amt,
+            "due_date": p["due_date"], "status": "paid", "days_to_due": 0,
+            "paid_at": iso(now_utc()), "pay_method": method,
+        })
+    return {"success": True, "collected": amt, "fully_paid": fully}
+
+
+# ============================================================================
+# DISTRIBUTOR — CUSTOMER DETAIL + LEDGER + CREDIT MANAGEMENT
+# ============================================================================
+@api_router.get("/distributor/me/customers/{cust_id}")
+async def distributor_customer_detail(cust_id: str, user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    cust = await db.users.find_one({"id": cust_id}, {"_id": 0})
+    if not cust:
+        raise HTTPException(404, "Customer not found")
+    orders = await db.orders.find({"user_id": cust_id, "distributor_id": d["id"]}, {"_id": 0}).to_list(500)
+    payments = await db.payments.find({"user_id": cust_id, "distributor_id": d["id"]}, {"_id": 0}).to_list(500)
+    credit_notes = await db.credit_notes.find({"user_id": cust_id, "distributor_id": d["id"]}, {"_id": 0}).to_list(200)
+    debit_notes = await db.debit_notes.find({"user_id": cust_id, "distributor_id": d["id"]}, {"_id": 0}).to_list(200)
+    cc = await cc_get(d["id"], cust_id)
+
+    entries = []
+    for o in orders:
+        entries.append({"id": o["id"], "type": "bill", "ref": o["code"], "label": f"Invoice {o['code']}",
+                        "date": o["created_at"], "debit": o["total"], "credit": 0, "status": o["status"]})
+    for p in payments:
+        if p["status"] == "paid":
+            entries.append({"id": p["id"], "type": "payment", "ref": p["invoice_code"], "label": f"Payment {p['invoice_code']}",
+                            "date": p.get("paid_at") or p["due_date"], "debit": 0, "credit": p["amount"], "status": "settled"})
+    for cn in credit_notes:
+        entries.append({"id": cn["id"], "type": "credit_note", "ref": cn["code"], "label": f"Credit Note: {cn['reason']}",
+                        "date": cn["created_at"], "debit": 0, "credit": cn["amount"], "status": cn.get("status", "issued")})
+    for dn in debit_notes:
+        entries.append({"id": dn["id"], "type": "debit_note", "ref": dn["code"], "label": f"Debit Note: {dn['reason']}",
+                        "date": dn["created_at"], "debit": dn["amount"], "credit": 0, "status": dn.get("status", "issued")})
+    entries.sort(key=lambda e: e["date"])
+    running = 0.0
+    for e in entries:
+        running += (e["debit"] - e["credit"])
+        e["running_balance"] = round(running, 2)
+
+    outstanding = round(sum(p["amount"] for p in payments if p["status"] in ("due", "overdue")), 2)
+    overdue = round(sum(p["amount"] for p in payments if p["status"] == "overdue"), 2)
+    last_order = max(orders, key=lambda o: o["created_at"]) if orders else None
+    c_lim = cc.get("credit_limit", 0)
+    c_used = round(cc.get("credit_used", 0), 2)
+
+    return {
+        "customer": {
+            "id": cust["id"], "name": cust.get("shop_name") or cust.get("name") or cust.get("email"),
+            "contact_name": cust.get("name"), "phone": cust.get("phone"), "email": cust.get("email"),
+            "address": cust.get("address"), "gst": cust.get("gst"), "drug_license": cust.get("drug_license"),
+        },
+        "credit": {
+            "credit_limit": c_lim, "credit_used": c_used, "credit_available": round(c_lim - c_used, 2),
+            "credit_used_pct": round((c_used / max(c_lim, 1)) * 100, 1),
+            "credit_days": cc.get("credit_days", 21), "settlement_discount_pct": cc.get("settlement_discount_pct", 1.5),
+        },
+        "stats": {
+            "total_spent": round(sum(o["total"] for o in orders), 2),
+            "order_count": len(orders),
+            "outstanding": outstanding, "overdue": overdue,
+            "last_order_at": last_order["created_at"] if last_order else None,
+        },
+        "recent_orders": sorted(orders, key=lambda o: o["created_at"], reverse=True)[:5],
+        "open_invoices": sorted([p for p in payments if p["status"] in ("due", "overdue")], key=lambda p: p["due_date"]),
+        "entries": entries,
+    }
+
+
+class SetCreditReq(BaseModel):
+    credit_limit: Optional[int] = None
+    credit_days: Optional[int] = None
+    settlement_discount_pct: Optional[float] = None
+
+
+@api_router.patch("/distributor/me/customers/{cust_id}/credit")
+async def distributor_set_credit(cust_id: str, req: SetCreditReq, user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    if not await db.users.find_one({"id": cust_id}, {"_id": 0}):
+        raise HTTPException(404, "Customer not found")
+    await cc_get(d["id"], cust_id)  # ensure exists
+    upd = {"updated_at": iso(now_utc())}
+    if req.credit_limit is not None:
+        if req.credit_limit < 0:
+            raise HTTPException(400, "Credit limit cannot be negative")
+        upd["credit_limit"] = int(req.credit_limit)
+    if req.credit_days is not None:
+        upd["credit_days"] = int(req.credit_days)
+    if req.settlement_discount_pct is not None:
+        upd["settlement_discount_pct"] = float(req.settlement_discount_pct)
+    await db.customer_credit.update_one({"distributor_id": d["id"], "user_id": cust_id}, {"$set": upd})
+    cc = await cc_get(d["id"], cust_id)
+    return {"success": True, "credit": cc}
+
+
+class DistNoteReq(BaseModel):
+    amount: float
+    reason: str
+    notes: Optional[str] = None
+    order_id: Optional[str] = None
+
+
+@api_router.post("/distributor/me/customers/{cust_id}/credit-note")
+async def distributor_issue_credit_note(cust_id: str, req: DistNoteReq, user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    if not await db.users.find_one({"id": cust_id}, {"_id": 0}):
+        raise HTTPException(404, "Customer not found")
+    if req.amount <= 0:
+        raise HTTPException(400, "Amount must be greater than zero")
+    cnt = await db.credit_notes.count_documents({"distributor_id": d["id"]})
+    cn = {
+        "id": str(uuid.uuid4()), "code": f"CN-{5000 + cnt + 1}", "user_id": cust_id,
+        "distributor_id": d["id"], "order_id": req.order_id, "amount": round(req.amount, 2),
+        "reason": req.reason, "notes": req.notes, "status": "issued",
+        "issued_by": "distributor", "created_at": iso(now_utc()),
+    }
+    await db.credit_notes.insert_one({**cn})
+    await cc_inc(d["id"], cust_id, -req.amount)
+    return {"success": True, "item": cn}
+
+
+@api_router.post("/distributor/me/customers/{cust_id}/debit-note")
+async def distributor_issue_debit_note(cust_id: str, req: DistNoteReq, user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    if not await db.users.find_one({"id": cust_id}, {"_id": 0}):
+        raise HTTPException(404, "Customer not found")
+    if req.amount <= 0:
+        raise HTTPException(400, "Amount must be greater than zero")
+    cnt = await db.debit_notes.count_documents({"distributor_id": d["id"]})
+    dn = {
+        "id": str(uuid.uuid4()), "code": f"DN-{5000 + cnt + 1}", "user_id": cust_id,
+        "distributor_id": d["id"], "order_id": req.order_id, "amount": round(req.amount, 2),
+        "reason": req.reason, "notes": req.notes, "status": "issued",
+        "issued_by": "distributor", "created_at": iso(now_utc()),
+    }
+    await db.debit_notes.insert_one({**dn})
+    return {"success": True, "item": dn}
+
+
+# ============================================================================
+# DISTRIBUTOR — MESSAGE PORTAL (two-way chat with customers)
+# ============================================================================
+@api_router.get("/distributor/me/chat/threads")
+async def distributor_chat_threads(user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    msgs = await db.chat_messages.find({"distributor_id": d["id"]}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    threads: dict = {}
+    for m in msgs:
+        uid = m["user_id"]
+        if uid not in threads:
+            threads[uid] = {"user_id": uid, "last_message": m, "unread": 0}
+        if m["sender"] == "user" and not m.get("read"):
+            threads[uid]["unread"] += 1
+    uids = list(threads.keys())
+    users = {u["id"]: u for u in await db.users.find({"id": {"$in": uids}}, {"_id": 0}).to_list(500)}
+    out = []
+    for uid, t in threads.items():
+        u = users.get(uid) or {}
+        out.append({
+            "customer": {"id": uid, "name": u.get("shop_name") or u.get("name") or u.get("email") or "—",
+                         "phone": u.get("phone")},
+            "last_message": t["last_message"], "unread": t["unread"],
+        })
+    out.sort(key=lambda t: t["last_message"]["created_at"], reverse=True)
+    return out
+
+
+@api_router.get("/distributor/me/chat/{cust_id}")
+async def distributor_chat_history(cust_id: str, user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    cust = await db.users.find_one({"id": cust_id}, {"_id": 0})
+    if not cust:
+        raise HTTPException(404, "Customer not found")
+    msgs = await db.chat_messages.find({"user_id": cust_id, "distributor_id": d["id"]}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    await db.chat_messages.update_many(
+        {"user_id": cust_id, "distributor_id": d["id"], "sender": "user", "read": False},
+        {"$set": {"read": True}},
+    )
+    return {
+        "customer": {"id": cust["id"], "name": cust.get("shop_name") or cust.get("name") or cust.get("email"),
+                     "phone": cust.get("phone")},
+        "messages": msgs,
+    }
+
+
+class DistChatReq(BaseModel):
+    user_id: str
+    message: str
+    attach_order_id: Optional[str] = None
+
+
+@api_router.post("/distributor/me/chat")
+async def distributor_send_chat(req: DistChatReq, user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    if not req.message.strip():
+        raise HTTPException(400, "Message cannot be empty")
+    msg = {
+        "id": str(uuid.uuid4()), "user_id": req.user_id, "distributor_id": d["id"],
+        "sender": "distributor", "message": req.message.strip(),
+        "attach_order_id": req.attach_order_id, "read": False, "created_at": iso(now_utc()),
+    }
+    await db.chat_messages.insert_one({**msg})
+    return {"success": True, "message": msg}
+
+
+
 # Register router
 app.include_router(api_router)
 
@@ -2936,6 +3422,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     await seed_database()
+    await seed_distributor_demo()
 
 
 @app.on_event("shutdown")

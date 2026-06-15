@@ -12,13 +12,18 @@ import { colors, radius, formatINRFull } from "@/src/theme";
 export default function DistributorHome() {
   const router = useRouter();
   const [data, setData] = useState<any>(null);
+  const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const d = await api("/distributor/me/dashboard");
+      const [d, threads] = await Promise.all([
+        api("/distributor/me/dashboard"),
+        api("/distributor/me/chat/threads").catch(() => []),
+      ]);
       setData(d);
+      setUnread((threads || []).reduce((s: number, t: any) => s + (t.unread || 0), 0));
     } catch (e: any) {
       showError(e?.message || "Could not load dashboard", "Load failed");
     } finally {
@@ -49,10 +54,33 @@ export default function DistributorHome() {
             <Text style={styles.heroName}>{d.short_name}</Text>
             <Text style={styles.heroSub}>{d.location} • Rating {d.rating}★</Text>
           </View>
-          <TouchableOpacity onPress={() => router.push("/d/more")} style={styles.heroSettings}>
-            <Ionicons name="settings-outline" size={18} color="#FFF" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <TouchableOpacity onPress={() => router.push("/d/messages")} style={styles.heroSettings}>
+              <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFF" />
+              {unread > 0 && <View style={styles.heroBadge}><Text style={styles.heroBadgeText}>{unread}</Text></View>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push("/d/more")} style={styles.heroSettings}>
+              <Ionicons name="settings-outline" size={18} color="#FFF" />
+            </TouchableOpacity>
+          </View>
         </LinearGradient>
+
+        {/* Quick actions */}
+        <View style={styles.quickRow}>
+          <TouchableOpacity style={styles.quickTile} onPress={() => router.push("/d/collections")}>
+            <View style={[styles.quickIcon, { backgroundColor: colors.successBg }]}><Ionicons name="cash" size={18} color={colors.success} /></View>
+            <Text style={styles.quickLabel}>Collections</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickTile} onPress={() => router.push("/d/customers")}>
+            <View style={[styles.quickIcon, { backgroundColor: colors.primaryBg }]}><Ionicons name="people" size={18} color={colors.primary} /></View>
+            <Text style={styles.quickLabel}>Customers</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickTile} onPress={() => router.push("/d/messages")}>
+            <View style={[styles.quickIcon, { backgroundColor: colors.infoBg }]}><Ionicons name="chatbubbles" size={18} color={colors.info} /></View>
+            <Text style={styles.quickLabel}>Messages</Text>
+            {unread > 0 && <View style={styles.quickBadge}><Text style={styles.heroBadgeText}>{unread}</Text></View>}
+          </TouchableOpacity>
+        </View>
 
         {/* Today's metrics */}
         <View style={styles.kpiRow}>
@@ -77,7 +105,7 @@ export default function DistributorHome() {
         <View style={styles.salesCard}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" }}>
             <View>
-              <Text style={styles.sectionLabel}>TODAY'S SALES</Text>
+              <Text style={styles.sectionLabel}>TODAY&apos;S SALES</Text>
               <Text style={styles.bigValue}>{formatINRFull(data.today_sales)}</Text>
               <Text style={styles.kpiSub}>{data.today_orders_count} orders</Text>
             </View>
@@ -125,14 +153,15 @@ export default function DistributorHome() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Top Customers</Text>
             {data.top_customers.slice(0, 5).map((c: any) => (
-              <View key={c.user_id} style={styles.custRow}>
+              <TouchableOpacity key={c.user_id} style={styles.custRow} onPress={() => router.push(`/d/customer/${c.user_id}`)}>
                 <View style={styles.avatar}><Text style={styles.avatarText}>{(c.shop_name || c.name)[0]?.toUpperCase()}</Text></View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.custName} numberOfLines={1}>{c.shop_name || c.name}</Text>
                   <Text style={styles.custMeta}>{c.orders} orders</Text>
                 </View>
                 <Text style={styles.custSpend}>{formatINRFull(c.total)}</Text>
-              </View>
+                <Ionicons name="chevron-forward" size={15} color={colors.textTertiary} />
+              </TouchableOpacity>
             ))}
           </View>
         )}
@@ -148,6 +177,14 @@ const styles = StyleSheet.create({
   heroName: { color: "#FFF", fontSize: 22, fontWeight: "800", marginTop: 4 },
   heroSub: { color: "rgba(255,255,255,0.9)", fontSize: 12, marginTop: 4, fontWeight: "600" },
   heroSettings: { width: 38, height: 38, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  heroBadge: { position: "absolute", top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.danger, alignItems: "center", justifyContent: "center", paddingHorizontal: 4, borderWidth: 1.5, borderColor: colors.primary },
+  heroBadgeText: { color: "#FFF", fontWeight: "800", fontSize: 10 },
+
+  quickRow: { flexDirection: "row", gap: 8, paddingHorizontal: 12, marginTop: 12 },
+  quickTile: { flex: 1, alignItems: "center", paddingVertical: 12, backgroundColor: "#FFF", borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, gap: 6 },
+  quickIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
+  quickLabel: { fontSize: 11.5, fontWeight: "700", color: colors.text },
+  quickBadge: { position: "absolute", top: 8, right: 16, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.danger, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
 
   kpiRow: { flexDirection: "row", paddingHorizontal: 12, marginTop: 14, gap: 8 },
   kpi: { flex: 1, padding: 12, borderRadius: radius.md },

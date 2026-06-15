@@ -3,12 +3,13 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput,
 import { useState, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { api } from "@/src/api";
 import { showError } from "@/src/components/Toast";
 import { colors, radius, formatINRFull } from "@/src/theme";
 
 export default function DistributorCustomers() {
+  const router = useRouter();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -61,7 +62,7 @@ export default function DistributorCustomers() {
           data={items}
           keyExtractor={(c) => c.user_id}
           renderItem={({ item: c }: any) => (
-            <View style={styles.card}>
+            <TouchableOpacity style={styles.card} activeOpacity={0.7} onPress={() => router.push(`/d/customer/${c.user_id}`)}>
               <View style={styles.cardHead}>
                 <View style={styles.avatar}>
                   <Text style={styles.avatarText}>{(c.name || "?")[0]?.toUpperCase()}</Text>
@@ -80,8 +81,8 @@ export default function DistributorCustomers() {
               </View>
 
               <View style={styles.metaGrid}>
-                <Metric label="Lifetime" value={formatINRFull(c.total_spent)} />
                 <Metric label="Outstanding" value={formatINRFull(c.outstanding)} danger={c.outstanding > 0} />
+                <Metric label="Credit left" value={formatINRFull(c.credit_available ?? 0)} />
                 <Metric label="Orders" value={String(c.orders)} />
               </View>
 
@@ -105,7 +106,7 @@ export default function DistributorCustomers() {
                   </TouchableOpacity>
                 )}
               </View>
-            </View>
+            </TouchableOpacity>
           )}
           ListEmptyComponent={
             <View style={styles.empty}>
