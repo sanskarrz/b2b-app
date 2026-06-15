@@ -608,3 +608,32 @@ agent_communication:
       6) Regression: /api/dashboard, /api/payments/summary, /api/ledger/dist-1, /api/cart, /api/distributors/dist-1, /api/chat/threads, /api/analytics/margin-by-category — all 200 OK ✅
 
       No 4xx/5xx errors except the intentional 400 for idempotency. Backend behavior matches the spec in the review request.
+  - agent: "testing"
+    message: |
+      Ran /app/backend_test.py against public preview URL. **15/15 assertions PASS.** Tests covered the latest review request:
+
+      1) GET /api/cart/lookup (NEW) ✅
+         - Returned `{items: {"<pid>::<did>": {item_id, qty}}, count, unique}` exactly as specified.
+         - After POST /api/cart/items with qty=2 → lookup shows qty=2, count=2, unique=1.
+         - Re-adding the same product+distributor with qty=3 → lookup shows qty=5, count=5, unique=1 (increment verified).
+
+      2) POST /api/scan/extract (NEW schema with `mode`) ✅
+         - mode="medicine" → 200, response keys = {mode, extracted, matches}, returned_mode="medicine".
+         - mode="prescription" → 200, returned_mode="prescription".
+         - mode="auto" → 200, returned_mode resolved (auto-detected as "medicine" for the tiny test image).
+         - mode omitted → 200 (defaults to auto), returned_mode="medicine".
+         - Graceful handling on 1x1 PNG garbage image — no 5xx, no crash. matches is always a list (0 or 1 items in our runs depending on OCR fallback). LLM integration via emergentintegrations is wired and responsive.
+
+      3) Onboarding / Profile drug_license + food_license ✅
+         - POST /api/auth/onboard with drug_license="MH-MUM-25-227891" + food_license="FSSAI-10024031000729" persists both; returned in response.user.
+         - GET /api/auth/me reflects both fields after onboard.
+         - PATCH /api/auth/profile {drug_license, food_license} updates both; /auth/me confirms the new values.
+
+      4) Regression sanity ✅
+         - POST /api/auth/send-otp + verify-otp for demo@rxtech.com → JWT issued.
+         - GET /api/dashboard → 200.
+         - GET /api/distributors/{id}/invoices → 200 with all required keys (distributor, open_invoices, invoice_history, overdue, outstanding, credit_limit, credit_used, credit_used_pct).
+         - POST /api/payments/pay-lump-sum {payment_ids:[...]} → 200, paid 1 invoice (₹4,325 verified).
+         - POST /api/credit-notes → 200, code "CN-2404" created.
+
+      No 4xx/5xx errors. All review-request items verified working end-to-end against the public preview URL.

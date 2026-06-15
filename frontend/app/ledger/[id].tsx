@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Platform,
+  TextInput,
 } from "react-native";
 import { useState, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -39,6 +40,7 @@ export default function Ledger() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "bill" | "payment" | "credit_note" | "debit_note">("all");
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,7 +66,18 @@ export default function Ledger() {
   const s = data.summary;
   const dist = data.distributor;
   const creditPct = s.credit_limit > 0 ? Math.min((s.credit_used / s.credit_limit) * 100, 100) : 0;
-  const entries = filter === "all" ? data.entries : data.entries.filter((e: any) => e.type === filter);
+  const baseEntries = filter === "all" ? data.entries : data.entries.filter((e: any) => e.type === filter);
+  const q = query.trim().toLowerCase();
+  const entries = !q
+    ? baseEntries
+    : baseEntries.filter((e: any) => {
+        return (
+          (e.note || "").toLowerCase().includes(q) ||
+          (e.invoice_code || "").toLowerCase().includes(q) ||
+          (e.type || "").toLowerCase().includes(q) ||
+          String(e.amount || "").includes(q)
+        );
+      });
   // Reverse for newest-first display
   const sorted = [...entries].reverse();
 
@@ -191,6 +204,26 @@ export default function Ledger() {
               </Text>
             </TouchableOpacity>
           ))}
+        </View>
+
+        {/* Search bar */}
+        <View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 6 }}>
+          <View style={styles.ledgerSearchBox}>
+            <Ionicons name="search" size={14} color={colors.textSecondary} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search invoice code, notes, amount…"
+              placeholderTextColor={colors.textTertiary}
+              style={styles.ledgerSearchInput}
+              testID="ledger-search"
+            />
+            {!!query && (
+              <TouchableOpacity onPress={() => setQuery("")} hitSlop={8}>
+                <Ionicons name="close-circle" size={14} color={colors.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {/* Entries */}
@@ -366,4 +399,12 @@ const styles = StyleSheet.create({
   entryDate: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
   entryAmount: { fontWeight: "800", fontSize: 14 },
   entryBalance: { color: colors.textSecondary, fontSize: 10, marginTop: 2 },
+  ledgerSearchBox: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 10, height: 36,
+    borderRadius: 10,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  ledgerSearchInput: { flex: 1, color: colors.text, fontSize: 13, paddingVertical: 0 },
 });

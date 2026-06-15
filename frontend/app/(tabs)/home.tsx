@@ -254,22 +254,35 @@ export default function HomeScreen() {
             </Animated.View>
           )}
 
-          {/* Action Required */}
+          {/* Action Required (only shown when there's actual credit usage) */}
+          {creditUsed > 0 && (
           <Animated.View entering={FadeInUp.delay(250).duration(400)}>
             <View style={[styles.sectionHead, { marginTop: 22 }]}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Ionicons name="alert-circle" size={16} color={colors.danger} />
-                <Text style={styles.sectionTitle}>Action Required</Text>
+                <Ionicons
+                  name={creditPct >= 60 ? "alert-circle" : "information-circle"}
+                  size={16}
+                  color={creditPct >= 60 ? colors.danger : colors.info}
+                />
+                <Text style={styles.sectionTitle}>
+                  {creditPct >= 60 ? "Action Required" : "Credit Status"}
+                </Text>
               </View>
             </View>
 
-            {/* Credit Risk Card */}
+            {/* Credit Risk Card — only renders if user has actually taken credit */}
             <View style={styles.creditCard}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <View style={styles.creditIconBox}>
-                  <Ionicons name="warning" size={16} color={colors.danger} />
+                <View style={[styles.creditIconBox, creditPct < 60 && { backgroundColor: colors.infoBg }]}>
+                  <Ionicons
+                    name={creditPct >= 60 ? "warning" : "card-outline"}
+                    size={16}
+                    color={creditPct >= 60 ? colors.danger : colors.info}
+                  />
                 </View>
-                <Text style={styles.creditTitle}>Credit Risk Warning</Text>
+                <Text style={styles.creditTitle}>
+                  {creditPct >= 85 ? "Credit Limit Nearly Hit" : creditPct >= 60 ? "Credit Risk Warning" : "Credit In Use"}
+                </Text>
                 <View style={{ flex: 1 }} />
                 <Text style={styles.creditPctText}>{creditPct}%</Text>
               </View>
@@ -347,6 +360,7 @@ export default function HomeScreen() {
               </View>
             </View>
           </Animated.View>
+          )}
 
           {/* Smart Reorder Banner + Quick Tools (replaces old Profit Opportunities) */}
           <Animated.View entering={FadeIn.delay(300).duration(400)}>

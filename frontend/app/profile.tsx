@@ -19,6 +19,8 @@ import { showError, showSuccess } from "@/src/components/Toast";
 import { colors, radius } from "@/src/theme";
 
 const GST_RX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9][A-Z][0-9A-Z]$/;
+const DL_RX = /^[A-Z0-9\-\/]{6,30}$/i;
+const FSSAI_RX = /^[0-9]{14}$/;
 
 export default function Profile() {
   const router = useRouter();
@@ -28,6 +30,8 @@ export default function Profile() {
   const [phone, setPhone] = useState("");
   const [shopName, setShopName] = useState("");
   const [gst, setGst] = useState("");
+  const [drugLic, setDrugLic] = useState("");
+  const [foodLic, setFoodLic] = useState("");
   const [address, setAddress] = useState("");
   const [email, setEmail] = useState("");
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -40,6 +44,8 @@ export default function Profile() {
         setPhone(me.phone || "");
         setShopName(me.shop_name || "");
         setGst(me.gst || "");
+        setDrugLic(me.drug_license || "");
+        setFoodLic(me.food_license || "");
         setAddress(me.address || "");
         setEmail(me.email || "");
       } catch (e: any) {
@@ -60,18 +66,20 @@ export default function Profile() {
     else if (!/^[6-9]/.test(phone.trim())) e.phone = "Indian mobile must start with 6, 7, 8 or 9";
 
     if (gst.trim() && !GST_RX.test(gst.trim())) e.gst = "Invalid GSTIN format (e.g., 27ABCDE1234F1Z5)";
+    if (drugLic.trim() && !DL_RX.test(drugLic.trim())) e.drug_license = "Invalid Drug License";
+    if (foodLic.trim() && !FSSAI_RX.test(foodLic.trim())) e.food_license = "FSSAI must be 14 digits";
 
     return e;
-  }, [name, phone, gst]);
+  }, [name, phone, gst, drugLic, foodLic]);
 
-  const valid = !errors.name && !errors.phone && !errors.gst;
+  const valid = !errors.name && !errors.phone && !errors.gst && !errors.drug_license && !errors.food_license;
 
   const markTouched = (k: string) => setTouched((t) => ({ ...t, [k]: true }));
 
   const save = async () => {
-    setTouched({ name: true, phone: true, gst: true });
+    setTouched({ name: true, phone: true, gst: true, drug_license: true, food_license: true });
     if (!valid) {
-      showError(errors.name || errors.phone || errors.gst || "Please fix the highlighted fields", "Cannot save");
+      showError(errors.name || errors.phone || errors.gst || errors.drug_license || errors.food_license || "Please fix the highlighted fields", "Cannot save");
       return;
     }
     setSaving(true);
@@ -83,6 +91,8 @@ export default function Profile() {
           phone: phone.trim(),
           shop_name: shopName.trim(),
           gst: gst.trim(),
+          drug_license: drugLic.trim(),
+          food_license: foodLic.trim(),
           address: address.trim(),
         },
       });
@@ -144,6 +154,26 @@ export default function Profile() {
             hint={!touched.gst || !errors.gst ? "Optional — 15-character GSTIN" : undefined}
             testID="profile-gst"
             autoCapitalize="characters"
+          />
+          <Field
+            label="Drug License No."
+            value={drugLic}
+            onChange={(v) => setDrugLic(v.toUpperCase().slice(0, 30))}
+            onBlur={() => markTouched("drug_license")}
+            error={touched.drug_license ? errors.drug_license : undefined}
+            hint={!touched.drug_license || !errors.drug_license ? "Optional — Form 20/21B license" : undefined}
+            testID="profile-drug-lic"
+            autoCapitalize="characters"
+          />
+          <Field
+            label="FSSAI / Food License"
+            value={foodLic}
+            onChange={(v) => setFoodLic(v.replace(/\D/g, "").slice(0, 14))}
+            onBlur={() => markTouched("food_license")}
+            keyboardType="number-pad"
+            error={touched.food_license ? errors.food_license : undefined}
+            hint={!touched.food_license || !errors.food_license ? "Optional — 14-digit FSSAI" : undefined}
+            testID="profile-food-lic"
           />
           <Field
             label="Shop address"

@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
+  TextInput,
 } from "react-native";
 import { useEffect, useState, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -51,6 +52,7 @@ export default function Orders() {
   const [tab, setTab] = useState("all");
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,9 +70,41 @@ export default function Orders() {
     }, [load])
   );
 
+  const filtered = !query.trim()
+    ? items
+    : items.filter((o: any) => {
+        const q = query.trim().toLowerCase();
+        return (
+          (o.code || "").toLowerCase().includes(q) ||
+          (o.distributor_name || "").toLowerCase().includes(q) ||
+          (o.status || "").toLowerCase().includes(q) ||
+          String(o.total || "").includes(q)
+        );
+      });
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <TopBar title="Orders" subtitle={`${items.length} ${tab === "all" ? "total" : tab}`} />
+      <TopBar title="Orders" subtitle={`${filtered.length} ${tab === "all" ? "total" : tab}${query ? ` (filtered)` : ""}`} />
+
+      {/* Search bar */}
+      <View style={styles.searchWrap}>
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={16} color={colors.textSecondary} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search by code, distributor, status…"
+            placeholderTextColor={colors.textTertiary}
+            style={styles.searchInput}
+            testID="orders-search"
+          />
+          {!!query && (
+            <TouchableOpacity onPress={() => setQuery("")} hitSlop={8}>
+              <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
 
       <View style={styles.tabs}>
         {STATUSES.map((s) => (
@@ -87,14 +121,14 @@ export default function Orders() {
 
       {loading ? (
         <ActivityIndicator color={colors.text} style={{ marginTop: 40 }} />
-      ) : items.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <View style={styles.empty}>
-          <Ionicons name="cube-outline" size={40} color={colors.textTertiary} />
-          <Text style={styles.emptyText}>No orders yet</Text>
+          <Ionicons name={query ? "search" : "cube-outline"} size={40} color={colors.textTertiary} />
+          <Text style={styles.emptyText}>{query ? `No orders match "${query}"` : "No orders yet"}</Text>
         </View>
       ) : (
         <FlatList
-          data={items}
+          data={filtered}
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 30 }}
           renderItem={({ item }) => {
@@ -164,4 +198,13 @@ const styles = StyleSheet.create({
   meta: { color: colors.textSecondary, fontSize: 12, marginTop: 8 },
   empty: { alignItems: "center", marginTop: 80, gap: 10 },
   emptyText: { color: colors.textSecondary, fontSize: 14 },
+  searchWrap: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 },
+  searchBox: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12, height: 40,
+    borderRadius: 12,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  searchInput: { flex: 1, color: colors.text, fontSize: 14, paddingVertical: 0 },
 });

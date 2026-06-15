@@ -152,13 +152,23 @@ export default function Payments() {
                   </View>
                   <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
                 </View>
-                <View style={[styles.ledgerTrack, { marginTop: 10 }]}>
-                  <View style={[styles.ledgerFill, { width: `${pct}%`, backgroundColor: colorBar }]} />
-                </View>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
-                  <Text style={styles.ledgerFootText}>Avail {formatINRFull(avail)}</Text>
-                  <Text style={[styles.ledgerFootText, { color: colorBar, fontWeight: "700" }]}>{pct.toFixed(0)}%</Text>
-                </View>
+                {used > 0 ? (
+                  <>
+                    <View style={[styles.ledgerTrack, { marginTop: 10 }]}>
+                      <View style={[styles.ledgerFill, { width: `${pct}%`, backgroundColor: colorBar }]} />
+                    </View>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
+                      <Text style={styles.ledgerFootText}>Avail {formatINRFull(avail)}</Text>
+                      <Text style={[styles.ledgerFootText, { color: colorBar, fontWeight: "700" }]}>{pct.toFixed(0)}%</Text>
+                    </View>
+                  </>
+                ) : (
+                  <View style={{ marginTop: 10, paddingVertical: 6 }}>
+                    <Text style={[styles.ledgerFootText, { color: colors.success, fontWeight: "700" }]}>
+                      ✓ No credit taken • {formatINRFull(limit)} available
+                    </Text>
+                  </View>
+                )}
               </TouchableOpacity>
             );
           })}

@@ -97,6 +97,8 @@ class OnboardRequest(BaseModel):
     shop_name: Optional[str] = None
     gst: Optional[str] = None
     address: Optional[str] = None
+    drug_license: Optional[str] = None
+    food_license: Optional[str] = None
 
 
 class User(BaseModel):
@@ -107,6 +109,8 @@ class User(BaseModel):
     shop_name: Optional[str] = None
     gst: Optional[str] = None
     address: Optional[str] = None
+    drug_license: Optional[str] = None
+    food_license: Optional[str] = None
     onboarded: bool = False
     created_at: str
 
@@ -392,6 +396,8 @@ async def verify_otp(payload: VerifyOTPRequest):
             "shop_name": None,
             "gst": None,
             "address": None,
+            "drug_license": None,
+            "food_license": None,
             "onboarded": False,
             "created_at": iso(now_utc()),
         }
@@ -417,6 +423,8 @@ async def onboard(payload: OnboardRequest, user: dict = Depends(get_current_user
         "shop_name": (payload.shop_name or "").strip() or None,
         "gst": (payload.gst or "").strip() or None,
         "address": (payload.address or "").strip() or None,
+        "drug_license": (payload.drug_license or "").strip() or None,
+        "food_license": (payload.food_license or "").strip() or None,
         "onboarded": True,
     }
     await db.users.update_one({"id": user["id"]}, {"$set": update})
@@ -665,6 +673,21 @@ async def remove_cart(item_id: str, user: dict = Depends(get_current_user)):
 async def clear_cart(user: dict = Depends(get_current_user)):
     await db.cart.delete_many({"user_id": user["id"]})
     return {"success": True}
+
+
+@api_router.get("/cart/lookup")
+async def cart_lookup(user: dict = Depends(get_current_user)):
+    """Quick lookup of cart contents keyed by `{product_id}::{distributor_id}` so the UI
+    can show 'in cart (qty)' indicators on search/product screens without fetching the
+    full cart payload."""
+    items = await db.cart.find({"user_id": user["id"]}, {"_id": 0}).to_list(500)
+    lookup: dict = {}
+    total = 0
+    for it in items:
+        key = f"{it['product_id']}::{it['distributor_id']}"
+        lookup[key] = {"item_id": it["id"], "qty": it["qty"]}
+        total += it["qty"]
+    return {"items": lookup, "count": total, "unique": len(items)}
 
 
 # ============================================================
@@ -1010,15 +1033,45 @@ EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 
 class ScanReq(BaseModel):
     image_base64: str  # data URI or raw base64
+    mode: Optional[str] = "auto"  # "medicine" | "prescription" | "auto"
+
+
+SCAN_PROMPTS = {
+    "medicine": (
+        "You are looking at a photo of a single medicine package (box, strip, vial or bottle). "
+        "Identify ONE medicine. Read the brand name, generic salt/composition, strength (mg/ml), "
+        "pack size, and manufacturer if visible. Return STRICT JSON, NO PROSE:\n"
+        "{\"mode\":\"medicine\",\"items\":[{\"name\":\"<brand+strength e.g. Crocin 650mg>\",\"salt\":\"<generic e.g. Paracetamol>\",\"strength\":\"<e.g. 650mg>\",\"pack\":\"<e.g. 15 tablets>\",\"manufacturer\":\"<brand owner>\",\"qty\":1}]}\n"
+        "If unsure of any field, leave it as empty string. If no medicine is visible, return {\"mode\":\"medicine\",\"items\":[]}."
+    ),
+    "prescription": (
+        "You are looking at a doctor's prescription OR a pharmacy bill/invoice. Extract EVERY medicine listed. "
+        "For each medicine, capture name + strength + quantity if mentioned. Return STRICT JSON, NO PROSE:\n"
+        "{\"mode\":\"prescription\",\"items\":[{\"name\":\"<brand or generic + strength>\",\"salt\":\"\",\"strength\":\"\",\"pack\":\"\",\"manufacturer\":\"\",\"qty\":<integer or 1 if not specified>}]}\n"
+        "Skip non-medicine items (consultation fees, GST line, etc.). If no medicines are readable, return items: []."
+    ),
+    "auto": (
+        "You are a pharmacy OCR assistant. First decide if the image is (a) a single medicine package/box/strip "
+        "OR (b) a multi-medicine document such as a prescription or pharmacy bill. Then extract structured info. "
+        "Return STRICT JSON, NO PROSE:\n"
+        "{\"mode\":\"medicine\" or \"prescription\",\"items\":[{\"name\":\"<brand+strength>\",\"salt\":\"<generic>\",\"strength\":\"<mg/ml>\",\"pack\":\"<pack size>\",\"manufacturer\":\"<owner>\",\"qty\":<integer>}]}\n"
+        "Be conservative. Empty string for unknown fields. items=[] if nothing readable."
+    ),
+}
 
 
 @api_router.post("/scan/extract")
 async def scan_extract(req: ScanReq, user: dict = Depends(get_current_user)):
-    """Extract medicines from a bill/prescription image, then search catalog for matches."""
+    """Extract medicines from a medicine-box photo, a prescription or a pharmacy bill,
+    then match each extracted medicine against the catalog and return the best
+    distributor offer + up to 2 alternates per medicine."""
     if not EMERGENT_LLM_KEY:
-        raise HTTPException(500, "OCR not configured")
+        raise HTTPException(500, "OCR not configured (missing EMERGENT_LLM_KEY)")
 
-    # Strip data: prefix
+    mode = (req.mode or "auto").lower()
+    if mode not in SCAN_PROMPTS:
+        mode = "auto"
+
     img = req.image_base64
     if "," in img and img.startswith("data:"):
         img = img.split(",", 1)[1]
@@ -1026,16 +1079,15 @@ async def scan_extract(req: ScanReq, user: dict = Depends(get_current_user)):
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=f"scan-{user['id']}-{int(now_utc().timestamp())}",
-        system_message=(
-            "You are a pharmacy OCR assistant. Look at the image of a doctor's prescription "
-            "OR a pharmacy bill/invoice. Extract ONLY medicine names (generic or brand). "
-            "Respond with a JSON array of strings, no prose. Example: [\"Azithromycin 500mg\", \"Paracetamol 650mg\"]. "
-            "If you cannot read any medicine names, return []."
-        ),
+        system_message=SCAN_PROMPTS[mode],
     ).with_model("openai", "gpt-4o-mini")
 
     msg = UserMessage(
-        text="Extract all medicine names from this image. Return strict JSON array.",
+        text=(
+            "Analyze this image and return JSON only."
+            if mode != "auto"
+            else "Decide if this is a single medicine package or a prescription/bill, then return JSON only."
+        ),
         file_contents=[ImageContent(image_base64=img)],
     )
     try:
@@ -1044,49 +1096,102 @@ async def scan_extract(req: ScanReq, user: dict = Depends(get_current_user)):
         logger.exception("OCR failed")
         raise HTTPException(500, f"OCR failed: {e}")
 
-    # Parse JSON array from response
-    import re, json as _json
+    import re as _re, json as _json
     text = (raw or "").strip()
-    # extract JSON array
-    m = re.search(r"\[.*\]", text, re.S)
-    names: List[str] = []
+    # extract JSON object
+    m = _re.search(r"\{.*\}", text, _re.S)
+    parsed: dict = {"mode": mode, "items": []}
     if m:
         try:
-            arr = _json.loads(m.group(0))
-            names = [str(x).strip() for x in arr if str(x).strip()]
+            parsed = _json.loads(m.group(0))
         except Exception:
-            names = []
+            parsed = {"mode": mode, "items": []}
+    if "items" not in parsed or not isinstance(parsed.get("items"), list):
+        parsed["items"] = []
+    detected_mode = parsed.get("mode") or mode
+    items_raw = parsed["items"][:30]
 
-    # Search catalog for each
-    matches = []
-    seen = set()
-    for n in names[:20]:
-        key = n.split()[0].lower() if n else ""
-        if not key or key in seen:
+    # Match each extracted item against catalog
+    matches: List[dict] = []
+    for entry in items_raw:
+        if not isinstance(entry, dict):
             continue
-        seen.add(key)
-        # search products by first significant token
-        items = await db.products.find(
-            {"$or": [
-                {"name": {"$regex": key, "$options": "i"}},
-                {"salt": {"$regex": key, "$options": "i"}},
-            ]},
-            {"_id": 0},
-        ).to_list(3)
-        if items:
-            # pick best (first) match — enrich with best distributor
-            best = items[0]
+        name = (entry.get("name") or "").strip()
+        salt = (entry.get("salt") or "").strip()
+        strength = (entry.get("strength") or "").strip()
+        pack = (entry.get("pack") or "").strip()
+        manufacturer = (entry.get("manufacturer") or "").strip()
+        qty = entry.get("qty")
+        try:
+            qty = max(1, int(qty)) if qty is not None else 1
+        except Exception:
+            qty = 1
+
+        # Build search tokens — first significant word(s) of name and salt
+        scan_label = name or salt or "Unknown"
+        tokens: List[str] = []
+        for src in [name, salt, manufacturer]:
+            for tok in _re.split(r"[\s\-\/]+", src):
+                tok = tok.strip().lower()
+                if len(tok) >= 3 and tok not in {"tablet", "tablets", "tab", "cap", "capsule", "syrup", "injection", "inj", "mg", "ml", "drop", "drops"} and not tok.isdigit():
+                    tokens.append(tok)
+        # de-dupe preserve order
+        seen_t: set = set()
+        tokens = [t for t in tokens if not (t in seen_t or seen_t.add(t))]
+
+        candidates: List[dict] = []
+        for tok in tokens[:3]:
+            found = await db.products.find(
+                {"$or": [
+                    {"name": {"$regex": tok, "$options": "i"}},
+                    {"salt": {"$regex": tok, "$options": "i"}},
+                    {"manufacturer": {"$regex": tok, "$options": "i"}},
+                ]},
+                {"_id": 0},
+            ).to_list(8)
+            for f in found:
+                if not any(c["id"] == f["id"] for c in candidates):
+                    candidates.append(f)
+            if len(candidates) >= 6:
+                break
+
+        # rank — prefer those whose name contains the strength
+        if strength:
+            strength_clean = strength.lower().replace(" ", "")
+            candidates.sort(
+                key=lambda p: 0 if strength_clean in p.get("name", "").lower().replace(" ", "") else 1
+            )
+
+        if candidates:
+            best = candidates[0]
             dist = await db.distributors.find_one({"id": best["best_distributor_id"]}, {"_id": 0})
             matches.append({
-                "scanned_name": n,
+                "scanned": {
+                    "label": scan_label,
+                    "name": name, "salt": salt, "strength": strength,
+                    "pack": pack, "manufacturer": manufacturer, "qty": qty,
+                },
                 "product": best,
                 "best_distributor": dist,
-                "alternatives": items[1:3],
+                "alternatives": candidates[1:3],
             })
         else:
-            matches.append({"scanned_name": n, "product": None, "best_distributor": None, "alternatives": []})
+            matches.append({
+                "scanned": {
+                    "label": scan_label,
+                    "name": name, "salt": salt, "strength": strength,
+                    "pack": pack, "manufacturer": manufacturer, "qty": qty,
+                },
+                "product": None,
+                "best_distributor": None,
+                "alternatives": [],
+            })
 
-    return {"extracted": names, "matches": matches}
+    return {
+        "mode": detected_mode,
+        "extracted": [m.get("scanned", {}).get("label", "") for m in matches],
+        "matches": matches,
+    }
 
 
 # ============================================================
@@ -1218,6 +1323,8 @@ class ProfileUpdateReq(BaseModel):
     shop_name: Optional[str] = None
     gst: Optional[str] = None
     address: Optional[str] = None
+    drug_license: Optional[str] = None
+    food_license: Optional[str] = None
 
 
 @api_router.patch("/auth/profile")

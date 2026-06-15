@@ -18,6 +18,10 @@ import { colors } from "@/src/theme";
 
 // GST format (relaxed): 2 digits state + 10 PAN chars + 1 digit + 1 letter + 1 alphanumeric
 const GST_RX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9][A-Z][0-9A-Z]$/;
+// Drug License: e.g., 20B/21B and state code - relaxed: alphanumeric+/ 8-25 chars
+const DL_RX = /^[A-Z0-9\-\/]{6,30}$/i;
+// Food License (FSSAI): 14-digit number
+const FSSAI_RX = /^[0-9]{14}$/;
 
 export default function Onboarding() {
   const router = useRouter();
@@ -25,6 +29,8 @@ export default function Onboarding() {
   const [phone, setPhone] = useState("");
   const [shopName, setShopName] = useState("");
   const [gst, setGst] = useState("");
+  const [drugLic, setDrugLic] = useState("");
+  const [foodLic, setFoodLic] = useState("");
   const [address, setAddress] = useState("");
   const [loading, setLoading] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -39,18 +45,20 @@ export default function Onboarding() {
     else if (!/^[6-9]/.test(phone.trim())) e.phone = "Indian mobile must start with 6, 7, 8 or 9";
 
     if (gst.trim() && !GST_RX.test(gst.trim())) e.gst = "Invalid GSTIN format (e.g., 27ABCDE1234F1Z5)";
+    if (drugLic.trim() && !DL_RX.test(drugLic.trim())) e.drug_license = "Invalid Drug License (e.g., MH-MUM-200012)";
+    if (foodLic.trim() && !FSSAI_RX.test(foodLic.trim())) e.food_license = "FSSAI must be 14 digits";
 
     return e;
-  }, [name, phone, gst]);
+  }, [name, phone, gst, drugLic, foodLic]);
 
-  const valid = !errors.name && !errors.phone && !errors.gst;
+  const valid = !errors.name && !errors.phone && !errors.gst && !errors.drug_license && !errors.food_license;
 
   const markTouched = (k: string) => setTouched((t) => ({ ...t, [k]: true }));
 
   const onSubmit = async () => {
-    setTouched({ name: true, phone: true, gst: true });
+    setTouched({ name: true, phone: true, gst: true, drug_license: true, food_license: true });
     if (!valid) {
-      const firstError = errors.name || errors.phone || errors.gst;
+      const firstError = errors.name || errors.phone || errors.gst || errors.drug_license || errors.food_license;
       showError(firstError || "Please fix the highlighted fields", "Cannot save");
       return;
     }
@@ -63,13 +71,14 @@ export default function Onboarding() {
           phone: phone.trim(),
           shop_name: shopName.trim(),
           gst: gst.trim(),
+          drug_license: drugLic.trim(),
+          food_license: foodLic.trim(),
           address: address.trim(),
         },
       });
       showSuccess("Welcome to RX Tech 🎉");
       router.replace("/(tabs)/home");
     } catch (e: any) {
-      // If backend returned per-field errors, surface them inline
       if (e?.fields && Object.keys(e.fields).length) {
         setTouched((t) => ({ ...t, ...Object.fromEntries(Object.keys(e.fields).map((k) => [k, true])) }));
         showError(e.message || "Please correct the highlighted fields", "Could not save");
@@ -127,6 +136,28 @@ export default function Onboarding() {
             hint={!touched.gst || !errors.gst ? "Optional — leave blank if you don't have one" : undefined}
             testID="onb-gst"
             autoCapitalize="characters"
+          />
+          <Field
+            label="Drug License No."
+            value={drugLic}
+            onChange={(v) => setDrugLic(v.toUpperCase().slice(0, 30))}
+            onBlur={() => markTouched("drug_license")}
+            placeholder="MH-MUM-200012"
+            error={touched.drug_license ? errors.drug_license : undefined}
+            hint={!touched.drug_license || !errors.drug_license ? "Optional — Form 20/21B license" : undefined}
+            testID="onb-drug-lic"
+            autoCapitalize="characters"
+          />
+          <Field
+            label="FSSAI / Food License"
+            value={foodLic}
+            onChange={(v) => setFoodLic(v.replace(/\D/g, "").slice(0, 14))}
+            onBlur={() => markTouched("food_license")}
+            placeholder="14-digit FSSAI number"
+            keyboardType="number-pad"
+            error={touched.food_license ? errors.food_license : undefined}
+            hint={!touched.food_license || !errors.food_license ? "Optional — for shops also selling food/nutraceuticals" : undefined}
+            testID="onb-food-lic"
           />
           <Field
             label="Shop address"

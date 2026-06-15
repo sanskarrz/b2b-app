@@ -10,6 +10,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Modal,
+  Pressable,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
@@ -18,6 +20,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { api } from "@/src/api";
 import { showError, showSuccess, showWarning } from "@/src/components/Toast";
+import { QtyStepper } from "@/src/components/QtyStepper";
+import { useCartLookup } from "@/src/hooks/useCartLookup";
 import { colors, radius, formatINRFull } from "@/src/theme";
 
 const RECENT = ["Azithromycin", "Paracetamol", "Cetirizine", "Metformin"];
@@ -94,29 +98,40 @@ export default function Search() {
     refreshCart();
   }, []);
 
-  const runScan = async (mode: "camera" | "library") => {
+  const [scanModalOpen, setScanModalOpen] = useState(false);
+  const [scanMode, setScanMode] = useState<"medicine" | "prescription">("medicine");
+
+  const openScan = (mode: "medicine" | "prescription") => {
+    setScanMode(mode);
+    setScanModalOpen(false);
+    runScan("camera", mode);
+  };
+
+  const runScan = async (source: "camera" | "library", mode: "medicine" | "prescription" = scanMode) => {
     try {
       const perm =
-        mode === "camera"
+        source === "camera"
           ? await ImagePicker.requestCameraPermissionsAsync()
           : await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
         showWarning(
-          `Please allow ${mode === "camera" ? "camera" : "photo library"} access in settings to use Scan.`,
+          `Please allow ${source === "camera" ? "camera" : "photo library"} access in settings to use Scan.`,
           "Permission needed"
         );
         return;
       }
       const result =
-        mode === "camera"
-          ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.6, allowsEditing: true })
-          : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.6, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+        source === "camera"
+          ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7, allowsEditing: true })
+          : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.7, mediaTypes: ImagePicker.MediaTypeOptions.Images });
       if (result.canceled || !result.assets?.[0]?.base64) return;
-      router.push({ pathname: "/scan-result", params: { image: result.assets[0].base64 } });
+      router.push({ pathname: "/scan-result", params: { image: result.assets[0].base64, mode } });
     } catch (e: any) {
       showError(e?.message || "Could not start scan", "Scan failed");
     }
   };
+
+  const cartLookup = useCartLookup();
 
   const addOffer = async (productId: string, offer: Offer) => {
     // Validation: out of stock?
@@ -124,20 +139,25 @@ export default function Search() {
       showWarning(`${offer.distributor_name} has 0 units of this medicine.`, "Out of stock");
       return;
     }
-    const key = `${productId}-${offer.distributor_id}`;
-    setAdding(key);
-    try {
-      await api("/cart/items", {
-        method: "POST",
-        body: { product_id: productId, distributor_id: offer.distributor_id, qty: 1 },
-      });
-      await refreshCart();
-      showSuccess(`Added from ${offer.distributor_name}`);
-    } catch (e: any) {
-      showError(e?.message || "Could not add to cart", "Add failed");
-    } finally {
-      setAdding(null);
+    await cartLookup.addOne(productId, offer.distributor_id);
+    await refreshCart();
+  };
+
+  const incOffer = async (productId: string, offer: Offer) => {
+    const cur = cartLookup.getQty(productId, offer.distributor_id);
+    if (offer.qty_available != null && cur + 1 > offer.qty_available) {
+      showWarning(`Only ${offer.qty_available} units available from ${offer.distributor_name}.`, "Stock limit");
+      return;
     }
+    await cartLookup.updateQty(productId, offer.distributor_id, cur + 1);
+    await refreshCart();
+  };
+
+  const decOffer = async (productId: string, offer: Offer) => {
+    const cur = cartLookup.getQty(productId, offer.distributor_id);
+    if (cur <= 0) return;
+    await cartLookup.updateQty(productId, offer.distributor_id, cur - 1);
+    await refreshCart();
   };
 
   const renderMatch = (m: Match, isAlt = false) => (
@@ -169,7 +189,6 @@ export default function Search() {
       {m.offers.map((o) => {
         const isCheapest = m.lowest_cost?.distributor_id === o.distributor_id;
         const isBestMargin = m.highest_margin?.distributor_id === o.distributor_id;
-        const key = `${m.product.id}-${o.distributor_id}`;
         return (
           <View key={o.distributor_id} style={styles.offerRow}>
             <View style={{ flex: 1 }}>
@@ -232,14 +251,14 @@ export default function Search() {
                 </View>
               </View>
             </View>
-            <TouchableOpacity
-              style={[styles.addBtn, adding === key && { opacity: 0.5 }]}
-              onPress={() => addOffer(m.product.id, o)}
-              disabled={adding === key}
+            <QtyStepper
+              qty={cartLookup.getQty(m.product.id, o.distributor_id)}
+              onAdd={() => addOffer(m.product.id, o)}
+              onInc={() => incOffer(m.product.id, o)}
+              onDec={() => decOffer(m.product.id, o)}
+              size="sm"
               testID={`add-offer-${o.distributor_id}`}
-            >
-              <Ionicons name={adding === key ? "checkmark" : "add"} size={18} color="#FFF" />
-            </TouchableOpacity>
+            />
           </View>
         );
       })}
@@ -273,19 +292,56 @@ export default function Search() {
         </View>
 
         <View style={styles.scanRow}>
-          <TouchableOpacity style={styles.scanBtn} onPress={() => runScan("camera")} testID="scan-btn">
+          <TouchableOpacity style={styles.scanBtn} onPress={() => setScanModalOpen(true)} testID="scan-btn">
             <View style={styles.scanIcon}>
               <Ionicons name="scan-outline" size={20} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.scanTitle}>Scan Prescription / Bill</Text>
-              <Text style={styles.scanSub}>AI extracts medicines & finds best vendors</Text>
+              <Text style={styles.scanTitle}>Scan Medicine / Bill</Text>
+              <Text style={styles.scanSub}>AI extracts and finds best vendors</Text>
             </View>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.uploadBtn} onPress={() => runScan("library")} testID="upload-btn">
+          <TouchableOpacity style={styles.uploadBtn} onPress={() => { setScanMode("prescription"); runScan("library", "prescription"); }} testID="upload-btn">
             <Ionicons name="cloud-upload-outline" size={22} color={colors.text} />
           </TouchableOpacity>
         </View>
+
+        {/* Scan mode picker modal */}
+        <Modal visible={scanModalOpen} transparent animationType="slide" onRequestClose={() => setScanModalOpen(false)}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setScanModalOpen(false)}>
+            <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>What are you scanning?</Text>
+              <Text style={styles.modalSub}>We&apos;ll tune the AI to read it accurately.</Text>
+
+              <TouchableOpacity style={styles.modeCard} onPress={() => openScan("medicine")} testID="mode-medicine">
+                <View style={[styles.modeIcon, { backgroundColor: colors.primaryBg }]}>
+                  <Ionicons name="medical" size={26} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modeTitle}>Medicine Box / Strip</Text>
+                  <Text style={styles.modeDesc}>Snap a single product to find it in the catalog with all vendor prices.</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.modeCard} onPress={() => openScan("prescription")} testID="mode-prescription">
+                <View style={[styles.modeIcon, { backgroundColor: colors.accentBg }]}>
+                  <Ionicons name="document-text" size={26} color={colors.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modeTitle}>Prescription / Bill</Text>
+                  <Text style={styles.modeDesc}>Scan a doctor&apos;s Rx or pharmacy invoice. AI lists all medicines + lets you add all to cart.</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.modeCancel} onPress={() => setScanModalOpen(false)}>
+                <Text style={styles.modeCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         {!searched ? (
           <ScrollView contentContainerStyle={{ padding: 16 }}>
@@ -472,4 +528,52 @@ const styles = StyleSheet.create({
   },
   empty: { alignItems: "center", marginTop: 60, gap: 10, paddingHorizontal: 24 },
   emptyText: { color: colors.textSecondary, fontSize: 13, textAlign: "center" },
+
+  // Scan mode picker modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    backgroundColor: colors.bg,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 28,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+  },
+  modalHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: colors.border,
+    borderRadius: 999,
+    alignSelf: "center",
+    marginBottom: 16,
+  },
+  modalTitle: { color: colors.text, fontSize: 18, fontWeight: "800", letterSpacing: -0.3 },
+  modalSub: { color: colors.textSecondary, fontSize: 12.5, marginTop: 3, marginBottom: 18 },
+  modeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    marginBottom: 10,
+  },
+  modeIcon: {
+    width: 50, height: 50, borderRadius: 14,
+    alignItems: "center", justifyContent: "center",
+  },
+  modeTitle: { color: colors.text, fontSize: 14.5, fontWeight: "800" },
+  modeDesc: { color: colors.textSecondary, fontSize: 11.5, lineHeight: 16, marginTop: 3 },
+  modeCancel: {
+    marginTop: 6,
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  modeCancelText: { color: colors.textSecondary, fontWeight: "700", fontSize: 13 },
 });
