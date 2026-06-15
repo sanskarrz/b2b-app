@@ -120,7 +120,7 @@ export default function DistributorCustomerDetail() {
         <View style={styles.card}>
           <View style={styles.cardHead}>
             <Text style={styles.cardTitle}>Credit Line</Text>
-            <TouchableOpacity style={styles.editBtn} onPress={() => { setLimit(String(cr.credit_limit)); setEditCredit(true); }}>
+            <TouchableOpacity style={styles.editBtn} onPress={() => { setLimit(String(cr.credit_limit)); setEditCredit(true); }} testID="edit-credit">
               <Ionicons name="create-outline" size={14} color={colors.primary} />
               <Text style={styles.editBtnText}>Edit limit</Text>
             </TouchableOpacity>
@@ -143,11 +143,11 @@ export default function DistributorCustomerDetail() {
 
         {/* Quick note actions */}
         <View style={styles.noteActions}>
-          <TouchableOpacity style={[styles.noteBtn, { backgroundColor: colors.successBg }]} onPress={() => { setNoteMode("credit"); setNoteReason("damaged"); }}>
+          <TouchableOpacity style={[styles.noteBtn, { backgroundColor: colors.successBg }]} onPress={() => { setNoteMode("credit"); setNoteReason("damaged"); }} testID="credit-note-btn">
             <Ionicons name="add-circle" size={16} color={colors.success} />
             <Text style={[styles.noteBtnText, { color: colors.success }]}>Credit Note</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.noteBtn, { backgroundColor: colors.dangerBg }]} onPress={() => { setNoteMode("debit"); setNoteReason("other"); }}>
+          <TouchableOpacity style={[styles.noteBtn, { backgroundColor: colors.dangerBg }]} onPress={() => { setNoteMode("debit"); setNoteReason("other"); }} testID="debit-note-btn">
             <Ionicons name="remove-circle" size={16} color={colors.danger} />
             <Text style={[styles.noteBtnText, { color: colors.danger }]}>Debit Note</Text>
           </TouchableOpacity>
@@ -164,7 +164,7 @@ export default function DistributorCustomerDetail() {
                   <Text style={[styles.invStatus, { color: p.status === "overdue" ? colors.danger : colors.warning }]}>{p.status.toUpperCase()}</Text>
                 </View>
                 <Text style={styles.invAmount}>{formatINRFull(p.amount)}</Text>
-                <TouchableOpacity style={styles.collectBtn} onPress={() => { setRecordInv(p); setAmount(String(Math.round(p.amount))); setMethod("cash"); }}>
+                <TouchableOpacity style={styles.collectBtn} onPress={() => { setRecordInv(p); setAmount(String(Math.round(p.amount))); setMethod("cash"); }} testID="collect-open">
                   <Text style={styles.collectText}>Collect</Text>
                 </TouchableOpacity>
               </View>
@@ -286,7 +286,7 @@ function ModalActions({ onCancel, onSave, saving, label }: any) {
   return (
     <View style={{ flexDirection: "row", gap: 8, marginTop: 18 }}>
       <TouchableOpacity style={styles.cancelBtn} onPress={onCancel}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
-      <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.5 }]} onPress={onSave} disabled={saving}>
+      <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.5 }]} onPress={onSave} disabled={saving} testID="modal-save">
         {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveText}>{label}</Text>}
       </TouchableOpacity>
     </View>

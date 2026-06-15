@@ -138,7 +138,7 @@ export default function DistributorCollections() {
                 <View style={{ alignItems: "flex-end", gap: 8 }}>
                   <Text style={styles.amount}>{formatINRFull(p.amount)}</Text>
                   {!isPaid && (
-                    <TouchableOpacity style={styles.recordBtn} onPress={() => openRecord(p)}>
+                    <TouchableOpacity style={styles.recordBtn} onPress={() => openRecord(p)} testID="record-btn">
                       <Ionicons name="checkmark-done" size={13} color="#FFF" />
                       <Text style={styles.recordBtnText}>Record</Text>
                     </TouchableOpacity>
@@ -169,7 +169,7 @@ export default function DistributorCollections() {
             </View>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 18 }}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setActive(null)}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.5 }]} onPress={record} disabled={saving}>
+              <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.5 }]} onPress={record} disabled={saving} testID="collect-confirm">
                 {saving ? <ActivityIndicator color="#FFF" /> : <><Ionicons name="cash" size={16} color="#FFF" /><Text style={styles.saveText}>Collect</Text></>}
               </TouchableOpacity>
             </View>

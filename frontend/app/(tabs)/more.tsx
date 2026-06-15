@@ -47,6 +47,27 @@ export default function More() {
     ]);
   };
 
+  const switchToDistributor = () => {
+    confirm(
+      "Switch to Distributor mode?",
+      "Manage incoming orders, inventory, customers, credit & collections. You can switch back anytime from More.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Switch",
+          onPress: async () => {
+            try {
+              await api("/distributor/switch-role", { method: "POST", body: { role: "distributor" } });
+              router.replace("/d/home");
+            } catch (e: any) {
+              Alert.alert("Failed", e?.message || "Could not switch to distributor mode");
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const sections: { title: string; items: ItemDef[] }[] = [
     {
       title: "Operations",
@@ -109,6 +130,18 @@ export default function More() {
           </View>
         )}
 
+        {/* Switch to Distributor mode */}
+        <TouchableOpacity style={styles.banner} onPress={switchToDistributor} testID="switch-distributor">
+          <View style={styles.bannerIcon}>
+            <Ionicons name="storefront-outline" size={18} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.bannerTitle}>Switch to Distributor mode</Text>
+            <Text style={styles.bannerSub}>Manage orders, stock, customers & collections</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+        </TouchableOpacity>
+
         {sections.map((sec, i) => (
           <View key={i} style={{ marginTop: 18 }}>
             <Text style={styles.sectionTitle}>{sec.title}</Text>
@@ -164,6 +197,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarText: { color: "#FFF", fontSize: 22, fontWeight: "800" },
+  banner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 16,
+    marginTop: 4,
+    padding: 14,
+    backgroundColor: colors.primaryBg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
+  },
+  bannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.bg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bannerTitle: { fontWeight: "800", fontSize: 14, color: colors.text },
+  bannerSub: { color: colors.textSecondary, fontSize: 11.5, marginTop: 2 },
   name: { fontWeight: "800", fontSize: 16, color: colors.text },
   sub: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   sectionTitle: {
