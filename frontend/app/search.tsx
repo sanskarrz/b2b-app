@@ -224,67 +224,45 @@ export default function Search() {
       {filteredOffers.map((o) => {
         const isCheapest = m.lowest_cost?.distributor_id === o.distributor_id;
         const isBestMargin = m.highest_margin?.distributor_id === o.distributor_id;
+        const metaParts: string[] = [];
+        if (o.rating != null) metaParts.push(`⭐ ${o.rating}`);
+        if (o.delivery_time) metaParts.push(o.delivery_time);
+        if (o.scheme) metaParts.push(o.scheme);
+        if (o.qty_available != null) metaParts.push(`📦 ${o.qty_available > 999 ? (o.qty_available / 1000).toFixed(1) + "k" : o.qty_available}`);
+        if (o.expiry) metaParts.push(`Exp ${o.expiry}`);
+        if (o.dist_discount_pct > 0) metaParts.push(`${o.dist_discount_pct}% off`);
+        if (o.gst_pct != null) metaParts.push(`GST ${o.gst_pct}%`);
         return (
           <View key={o.distributor_id} style={styles.offerRow}>
-            <View style={{ flex: 1 }}>
-              <View style={styles.offerTopRow}>
-                <Text style={styles.distName}>{o.distributor_name}</Text>
+            <View style={{ flex: 1, gap: 3 }}>
+              {/* Line 1: Dist name + flags */}
+              <View style={styles.offerLine1}>
+                <Text style={styles.distName} numberOfLines={1}>{o.distributor_name}</Text>
                 {isCheapest && (
-                  <View style={[styles.flagPill, { backgroundColor: "#DCFCE7" }]}>
-                    <Ionicons name="pricetag" size={9} color="#15803D" />
-                    <Text style={[styles.flagText, { color: "#15803D" }]}>LOWEST</Text>
+                  <View style={styles.flagPillSm}>
+                    <Text style={styles.flagTextSm}>LOWEST</Text>
                   </View>
                 )}
-                {isBestMargin && !isCheapest && (
-                  <View style={[styles.flagPill, { backgroundColor: colors.primaryBg }]}>
-                    <Ionicons name="trending-up" size={9} color={colors.primary} />
-                    <Text style={[styles.flagText, { color: colors.primary }]}>BEST MARGIN</Text>
-                  </View>
-                )}
-                {isBestMargin && isCheapest && (
-                  <View style={[styles.flagPill, { backgroundColor: colors.primaryBg }]}>
-                    <Ionicons name="trending-up" size={9} color={colors.primary} />
-                    <Text style={[styles.flagText, { color: colors.primary }]}>BEST MARGIN</Text>
+                {isBestMargin && (
+                  <View style={[styles.flagPillSm, { backgroundColor: colors.primaryBg }]}>
+                    <Text style={[styles.flagTextSm, { color: colors.primary }]}>BEST MARGIN</Text>
                   </View>
                 )}
               </View>
-              <Text style={styles.distMeta}>
-                ⭐ {o.rating} • {o.delivery_time}
-                {o.scheme ? ` • ${o.scheme}` : ""}
-              </Text>
-              {/* Rich offer row: qty + expiry + dist discount + GST */}
-              <View style={styles.metaRichRow}>
-                {o.qty_available != null && (
-                  <View style={styles.metaTag}>
-                    <Ionicons name="cube-outline" size={9} color={colors.textSecondary} />
-                    <Text style={styles.metaTagText}>{o.qty_available > 999 ? `${(o.qty_available / 1000).toFixed(1)}k` : o.qty_available} avl</Text>
-                  </View>
-                )}
-                {o.expiry && (
-                  <View style={styles.metaTag}>
-                    <Ionicons name="calendar-outline" size={9} color={colors.textSecondary} />
-                    <Text style={styles.metaTagText}>Exp {o.expiry}</Text>
-                  </View>
-                )}
-                {o.dist_discount_pct > 0 && (
-                  <View style={[styles.metaTag, { backgroundColor: colors.accentBg }]}>
-                    <Ionicons name="pricetag-outline" size={9} color={colors.accent} />
-                    <Text style={[styles.metaTagText, { color: colors.accent, fontWeight: "800" }]}>{o.dist_discount_pct}% off</Text>
-                  </View>
-                )}
-                {o.gst_pct != null && (
-                  <View style={styles.metaTag}>
-                    <Text style={styles.metaTagText}>GST {o.gst_pct}%</Text>
-                  </View>
-                )}
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
+              {/* Line 2: Price + Margin */}
+              <View style={styles.offerLine2}>
                 <Text style={styles.ptr}>{formatINRFull(o.ptr)}</Text>
                 <Text style={styles.mrpStrike}>MRP {formatINRFull(o.mrp)}</Text>
                 <View style={styles.marginPill}>
-                  <Text style={styles.marginPillText}>{o.margin_pct.toFixed(1)}% margin</Text>
+                  <Text style={styles.marginPillText}>{o.margin_pct.toFixed(1)}%</Text>
                 </View>
               </View>
+              {/* Line 3: dense meta in one inline string */}
+              {metaParts.length > 0 && (
+                <Text style={styles.metaInline} numberOfLines={2}>
+                  {metaParts.join("  •  ")}
+                </Text>
+              )}
             </View>
             <QtyInputAdd
               inCartQty={cartLookup.getQty(m.product.id, o.distributor_id)}
@@ -589,52 +567,63 @@ const styles = StyleSheet.create({
   matchCard: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.lg,
-    marginBottom: 12,
+    borderRadius: radius.md,
+    marginBottom: 10,
     overflow: "hidden",
     backgroundColor: colors.bg,
   },
   matchHead: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 12,
-    gap: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 10,
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   thumb: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     backgroundColor: colors.bg,
     alignItems: "center",
     justifyContent: "center",
   },
-  pName: { fontWeight: "800", color: colors.text, fontSize: 14 },
-  pSalt: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
-  pPack: { color: colors.textTertiary, fontSize: 10, marginTop: 2 },
+  pName: { fontWeight: "800", color: colors.text, fontSize: 13.5, letterSpacing: -0.2 },
+  pSalt: { color: colors.textSecondary, fontSize: 11, marginTop: 1 },
+  pPack: { color: colors.textTertiary, fontSize: 10.5, marginTop: 1 },
   offersHead: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 4,
+    paddingHorizontal: 10,
+    paddingTop: 6,
+    paddingBottom: 2,
   },
   offersHeadText: { color: colors.textSecondary, fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
   offerRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    gap: 10,
+    gap: 8,
   },
+  offerLine1: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  offerLine2: { flexDirection: "row", alignItems: "center", gap: 6 },
   offerTopRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  distName: { fontWeight: "700", color: colors.text, fontSize: 13 },
+  distName: { fontWeight: "800", color: colors.text, fontSize: 12.5, letterSpacing: -0.1 },
   distMeta: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
-  ptr: { fontWeight: "800", color: colors.text, fontSize: 16 },
-  marginPill: { backgroundColor: colors.surface, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  marginPillText: { color: colors.textSecondary, fontSize: 10, fontWeight: "700" },
+  metaInline: { color: colors.textSecondary, fontSize: 10.5, lineHeight: 14, fontWeight: "500" },
+  ptr: { fontWeight: "800", color: colors.text, fontSize: 14.5 },
+  flagPillSm: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  flagTextSm: { color: "#15803D", fontSize: 8.5, fontWeight: "900", letterSpacing: 0.4 },
+  marginPill: { backgroundColor: colors.successBg, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5 },
+  marginPillText: { color: colors.success, fontSize: 10, fontWeight: "800" },
   flagPill: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   flagText: { fontSize: 9, fontWeight: "800", letterSpacing: 0.3 },
   addBtn: {

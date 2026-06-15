@@ -434,7 +434,26 @@
         agent: "main"
         comment: "New screen /dist-invoices/[id] shows gradient hero with outstanding amount, overdue + open counts, in-hero Credit Used progress bar (color-coded green/amber/red). Two tabs: Open (N) and History (N). Open tab supports multi-select via tap-to-toggle checkboxes; floating sticky pay-bar appears at bottom with running total + 'Pay Lump Sum' gradient button (calls POST /api/payments/pay-lump-sum). 'Select All' chip toggles all open invoices; 'Overdue (N)' chip auto-selects only overdue. Overdue rows have red left border + 'OVERDUE' pill. History tab shows paid invoices with green tick. Each row has 'View →' to open /invoice/[id]. Wired from: (1) Ledger hero 'Pay' button → /dist-invoices/{id}, (2) Distributor profile hero now has 5 action pills with new 'Bills' pill → /dist-invoices/{id}. Verified end-to-end via Playwright: select-all/clear-all toggle works, history tab loads paid invoices, hero metrics render correctly, lump-sum button shows accurate total."
 
-  - task: "Search Mapped/Non-Mapped tabs + Distributor filter + Qty-input batch add + Product Detail redesign (Compare/Substitute/Variant)"
+  - task: "Search & Product Detail — Horizontal-dense layout for maximum data per scroll"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/search.tsx + /app/frontend/app/product/[id].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Per-client feedback "we need it horizontally, so maximum data at most scroll":
+          - **Offer row** compressed from 4 vertical sections (~180px) down to a tight 3-line dense layout (~55px). Result: ~10 offer rows visible per screen vs ~2 before — a 5× density improvement.
+          - **Line 1**: Distributor name + LOWEST / BEST MARGIN flags
+          - **Line 2**: PTR (bold) • MRP (strikethrough) • Margin% (green pill)
+          - **Line 3**: All meta in one inline dot-separated string — `⭐ rating • delivery • scheme • 📦 qty • Exp date • discount% • GST%` (auto-wraps to 2 lines max)
+          - **QtyInputAdd** unchanged on the right (Qty input + ➕ or − N + stepper)
+          - **Product Detail Compare rows** received same dense treatment
+          - Smaller thumb (36px) + tighter padding (10/8) + smaller match-card border-radius for a denser feel.
+          - Verified: paracetamol search now shows 3 full products + 10 offer rows in a single mobile screen; Product Detail shows all 3 compare offers + sticky bottom bar without scroll.
     implemented: true
     working: true
     file: "/app/frontend/app/search.tsx + /app/frontend/app/product/[id].tsx + /app/backend/server.py"

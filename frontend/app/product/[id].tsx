@@ -323,21 +323,19 @@ function TabBtn({ label, badge, active, onPress }: { label: string; badge?: numb
 function CompareRow({
   offer, inCart, onAdd, onInc, onDec,
 }: { offer: Offer; inCart: number; onAdd: (q: number) => void; onInc: () => void; onDec: () => void }) {
+  const metaParts: string[] = [];
+  if (offer.rating != null) metaParts.push(`⭐ ${offer.rating}`);
+  if (offer.delivery_time) metaParts.push(offer.delivery_time);
+  if (offer.scheme) metaParts.push(offer.scheme);
+  if (offer.qty_available != null) metaParts.push(`📦 ${offer.qty_available > 999 ? (offer.qty_available / 1000).toFixed(1) + "k" : offer.qty_available}`);
+  if (offer.expiry) metaParts.push(`Exp ${offer.expiry}`);
+  if (offer.dist_discount_pct) metaParts.push(`${offer.dist_discount_pct}% off`);
+  if (offer.gst_pct != null) metaParts.push(`GST ${offer.gst_pct}%`);
   return (
     <View style={styles.compareRow}>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, gap: 3 }}>
         <Text style={styles.compName} numberOfLines={1}>{offer.distributor_name}</Text>
-        <Text style={styles.compMeta}>
-          ⭐ {offer.rating ?? "—"} • {offer.delivery_time || "—"}
-          {offer.scheme ? `  •  ${offer.scheme}` : ""}
-        </Text>
-        <View style={styles.compTagRow}>
-          {offer.qty_available != null && (
-            <Text style={styles.compTag}>📦 {offer.qty_available > 999 ? `${(offer.qty_available / 1000).toFixed(1)}k` : offer.qty_available} avl</Text>
-          )}
-          {offer.expiry && <Text style={styles.compTag}>Exp {offer.expiry}</Text>}
-        </View>
-        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, marginTop: 4 }}>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
           <Text style={styles.compPtr}>{formatINRFull(offer.ptr)}</Text>
           <Text style={styles.compMrp}>MRP {formatINRFull(offer.mrp)}</Text>
           {offer.margin_pct != null && (
@@ -346,6 +344,11 @@ function CompareRow({
             </View>
           )}
         </View>
+        {metaParts.length > 0 && (
+          <Text style={styles.compMetaInline} numberOfLines={2}>
+            {metaParts.join("  •  ")}
+          </Text>
+        )}
       </View>
       <QtyInputAdd
         inCartQty={inCart}
@@ -485,22 +488,24 @@ const styles = StyleSheet.create({
   compareRow: {
     flexDirection: "row",
     backgroundColor: "#FFF",
-    padding: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    marginBottom: 10,
-    gap: 10,
+    marginBottom: 8,
+    gap: 8,
     alignItems: "center",
     ...(SHADOW as object),
   },
-  compName: { color: colors.text, fontWeight: "800", fontSize: 13.5 },
+  compName: { color: colors.text, fontWeight: "800", fontSize: 13 },
   compMeta: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
+  compMetaInline: { color: colors.textSecondary, fontSize: 10.5, lineHeight: 14, fontWeight: "500" },
   compTagRow: { flexDirection: "row", gap: 8, marginTop: 4 },
   compTag: { color: colors.textSecondary, fontSize: 10.5, fontWeight: "600" },
   compPtr: { color: colors.text, fontWeight: "800", fontSize: 14 },
   compMrp: { color: colors.textTertiary, fontSize: 10.5, textDecorationLine: "line-through" },
-  compMarginPill: { backgroundColor: colors.successBg, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1 },
+  compMarginPill: { backgroundColor: colors.successBg, borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1 },
   compMarginText: { color: colors.success, fontWeight: "800", fontSize: 10 },
 
   // Alt/variant rows
