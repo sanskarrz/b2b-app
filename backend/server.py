@@ -595,12 +595,55 @@ async def get_product(pid: str):
     p = await db.products.find_one({"id": pid}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Not found")
-    distributors = await db.distributors.find({"id": {"$in": p["distributor_ids"]}}, {"_id": 0}).to_list(20)
-    # Substitutes — same salt different product
-    substitutes = await db.products.find(
-        {"salt": p["salt"], "id": {"$ne": pid}}, {"_id": 0}
+
+    # Build per-distributor offers (same shape as search/comprehensive)
+    dist_map = {d["id"]: d for d in await db.distributors.find({}, {"_id": 0}).to_list(50)}
+    offers: List[dict] = []
+    for pr in (p.get("prices") or []):
+        d = dist_map.get(pr["distributor_id"])
+        if not d:
+            continue
+        offers.append({
+            "distributor_id": pr["distributor_id"],
+            "distributor_name": d["short_name"],
+            "distributor_full_name": d["name"],
+            "rating": d.get("rating"),
+            "delivery_time": d.get("delivery_time"),
+            "ptr": pr["ptr"],
+            "mrp": pr.get("mrp", p["mrp"]),
+            "scheme": pr.get("scheme"),
+            "margin_pct": pr.get("margin_pct"),
+            "qty_available": pr.get("qty_available", 0),
+            "dist_discount_pct": pr.get("dist_discount_pct", 0),
+            "gst_pct": pr.get("gst_pct", 12.0),
+            "expiry": pr.get("expiry"),
+            "delivery_eta_hours": pr.get("delivery_eta_hours", 24),
+        })
+    offers.sort(key=lambda x: x["ptr"])
+    lowest = offers[0] if offers else None
+    highest_margin = max(offers, key=lambda x: x.get("margin_pct", 0)) if offers else None
+
+    # Variants — same SALT and same MANUFACTURER, different product
+    variants = await db.products.find(
+        {"salt": p["salt"], "manufacturer": p["manufacturer"], "id": {"$ne": pid}}, {"_id": 0}
     ).to_list(10)
-    return {"product": p, "distributors": distributors, "substitutes": substitutes}
+    # Substitutes — same SALT, DIFFERENT MANUFACTURER (alternate brands)
+    substitutes = await db.products.find(
+        {"salt": p["salt"], "manufacturer": {"$ne": p["manufacturer"]}, "id": {"$ne": pid}}, {"_id": 0}
+    ).to_list(20)
+
+    # Older clients expect "distributors" list — keep for compat (list of dist objs that offer it)
+    distributors = [dist_map[did] for did in p.get("distributor_ids", []) if did in dist_map]
+
+    return {
+        "product": p,
+        "offers": offers,
+        "lowest_cost": {"distributor_id": lowest["distributor_id"], "distributor_name": lowest["distributor_name"], "ptr": lowest["ptr"]} if lowest else None,
+        "highest_margin": {"distributor_id": highest_margin["distributor_id"], "distributor_name": highest_margin["distributor_name"], "margin_pct": highest_margin.get("margin_pct")} if highest_margin else None,
+        "distributors": distributors,
+        "variants": variants,
+        "substitutes": substitutes,
+    }
 
 
 # ============================================================

@@ -21,6 +21,7 @@ import { useRouter } from "expo-router";
 import { api } from "@/src/api";
 import { showError, showSuccess, showWarning } from "@/src/components/Toast";
 import { QtyStepper } from "@/src/components/QtyStepper";
+import { QtyInputAdd } from "@/src/components/QtyInputAdd";
 import { useCartLookup } from "@/src/hooks/useCartLookup";
 import { colors, radius, formatINRFull } from "@/src/theme";
 
@@ -58,6 +59,10 @@ export default function Search() {
   const [searched, setSearched] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [cart, setCart] = useState<{ count: number; total: number; items: any[] }>({ count: 0, total: 0, items: [] });
+  const [tab, setTab] = useState<"mapped" | "non_mapped">("mapped");
+  const [distFilter, setDistFilter] = useState<string | null>(null); // distributor_id or null = all
+  const [distFilterOpen, setDistFilterOpen] = useState(false);
+  const [allDistributors, setAllDistributors] = useState<any[]>([]);
 
   // Smart debounced search — minimum 2 chars + trim
   useEffect(() => {
@@ -96,7 +101,31 @@ export default function Search() {
 
   useEffect(() => {
     refreshCart();
+    api("/distributors").then(setAllDistributors).catch(() => {});
   }, []);
+
+  // Add with custom qty (from QtyInputAdd)
+  const addOfferQty = async (productId: string, offer: Offer, qty: number) => {
+    if (offer.qty_available != null && offer.qty_available <= 0) {
+      showWarning(`${offer.distributor_name} has 0 units of this medicine.`, "Out of stock");
+      return;
+    }
+    if (offer.qty_available != null && qty > offer.qty_available) {
+      showWarning(`Only ${offer.qty_available} units available from ${offer.distributor_name}.`, "Stock limit");
+      return;
+    }
+    try {
+      await api("/cart/items", {
+        method: "POST",
+        body: { product_id: productId, distributor_id: offer.distributor_id, qty },
+      });
+      await cartLookup.refresh();
+      await refreshCart();
+      showSuccess(`Added ${qty} unit${qty > 1 ? "s" : ""} from ${offer.distributor_name}`);
+    } catch (e: any) {
+      showError(e?.message || "Could not add to cart", "Add failed");
+    }
+  };
 
   const [scanModalOpen, setScanModalOpen] = useState(false);
   const [scanMode, setScanMode] = useState<"medicine" | "prescription">("medicine");
@@ -160,7 +189,13 @@ export default function Search() {
     await refreshCart();
   };
 
-  const renderMatch = (m: Match, isAlt = false) => (
+  const renderMatch = (m: Match, isAlt = false) => {
+    const filteredOffers = distFilter ? m.offers.filter((o) => o.distributor_id === distFilter) : m.offers;
+    if (distFilter && filteredOffers.length === 0) return null;
+    const distName = distFilter
+      ? (allDistributors.find((d) => d.id === distFilter)?.short_name || "this distributor")
+      : "";
+    return (
     <View key={m.product.id} style={[styles.matchCard, isAlt && { borderStyle: "dashed" }]}>
       <TouchableOpacity
         style={styles.matchHead}
@@ -186,7 +221,7 @@ export default function Search() {
         <Text style={styles.offersHeadText}>{m.offers.length} distributors offering this</Text>
       </View>
 
-      {m.offers.map((o) => {
+      {filteredOffers.map((o) => {
         const isCheapest = m.lowest_cost?.distributor_id === o.distributor_id;
         const isBestMargin = m.highest_margin?.distributor_id === o.distributor_id;
         return (
@@ -251,19 +286,20 @@ export default function Search() {
                 </View>
               </View>
             </View>
-            <QtyStepper
-              qty={cartLookup.getQty(m.product.id, o.distributor_id)}
-              onAdd={() => addOffer(m.product.id, o)}
+            <QtyInputAdd
+              inCartQty={cartLookup.getQty(m.product.id, o.distributor_id)}
+              onAdd={(qty) => addOfferQty(m.product.id, o, qty)}
               onInc={() => incOffer(m.product.id, o)}
               onDec={() => decOffer(m.product.id, o)}
-              size="sm"
+              maxQty={o.qty_available}
               testID={`add-offer-${o.distributor_id}`}
             />
           </View>
         );
       })}
     </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -371,22 +407,105 @@ export default function Search() {
             <Text style={styles.emptyText}>No products found for &quot;{q}&quot;</Text>
           </View>
         ) : (
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 30 }}>
-            {matches.length > 0 && (
-              <>
-                <Text style={styles.resultHead}>Matched ({matches.length})</Text>
-                {matches.map((m) => renderMatch(m))}
-              </>
-            )}
-            {alternatives.length > 0 && (
-              <>
-                <Text style={[styles.resultHead, { marginTop: 14 }]}>
-                  Alternate brands ({alternatives.length}) — same salt
-                </Text>
-                {alternatives.map((m) => renderMatch(m, true))}
-              </>
-            )}
-          </ScrollView>
+          <>
+            {/* Mapped / Non-Mapped tabs + Distributor filter */}
+            <View style={styles.subHeader}>
+              <View style={styles.subTabsRow}>
+                <TouchableOpacity
+                  style={[styles.subTab, tab === "mapped" && styles.subTabActive]}
+                  onPress={() => setTab("mapped")}
+                  testID="tab-mapped"
+                >
+                  <Text style={[styles.subTabText, tab === "mapped" && styles.subTabTextActive]}>
+                    Mapped ({matches.length})
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.subTab, tab === "non_mapped" && styles.subTabActive]}
+                  onPress={() => setTab("non_mapped")}
+                  testID="tab-non-mapped"
+                >
+                  <Text style={[styles.subTabText, tab === "non_mapped" && styles.subTabTextActive]}>
+                    Non-Mapped ({alternatives.length})
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.filterRow}>
+                <TouchableOpacity
+                  style={styles.distFilterChip}
+                  onPress={() => setDistFilterOpen(true)}
+                  testID="dist-filter"
+                >
+                  <Ionicons name="business-outline" size={13} color={colors.textSecondary} />
+                  <Text style={styles.distFilterText} numberOfLines={1}>
+                    {distFilter ? (allDistributors.find((d) => d.id === distFilter)?.short_name || "Distributor") : "All Distributors"}
+                  </Text>
+                  <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
+                </TouchableOpacity>
+                {distFilter && (
+                  <TouchableOpacity style={styles.clearFilter} onPress={() => setDistFilter(null)}>
+                    <Ionicons name="close-circle" size={16} color={colors.danger} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 30 }}>
+              {tab === "mapped" ? (
+                matches.length === 0 ? (
+                  <View style={styles.empty}>
+                    <Ionicons name="search" size={32} color={colors.textTertiary} />
+                    <Text style={styles.emptyText}>No matched products for &quot;{q}&quot;</Text>
+                    <TouchableOpacity onPress={() => setTab("non_mapped")} style={styles.emptyAction}>
+                      <Text style={styles.emptyActionText}>See Non-Mapped suggestions →</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  matches.map((m) => renderMatch(m))
+                )
+              ) : alternatives.length === 0 ? (
+                <View style={styles.empty}>
+                  <Ionicons name="bulb-outline" size={32} color={colors.textTertiary} />
+                  <Text style={styles.emptyText}>No alternate-brand suggestions.</Text>
+                  <Text style={styles.emptySub}>Non-Mapped will list same-salt alternates from other manufacturers.</Text>
+                </View>
+              ) : (
+                alternatives.map((m) => renderMatch(m, true))
+              )}
+            </ScrollView>
+
+            {/* Distributor picker modal */}
+            <Modal visible={distFilterOpen} transparent animationType="fade" onRequestClose={() => setDistFilterOpen(false)}>
+              <Pressable style={styles.pickerBackdrop} onPress={() => setDistFilterOpen(false)}>
+                <Pressable style={styles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+                  <View style={styles.pickerHandle} />
+                  <Text style={styles.pickerTitle}>Filter by Distributor</Text>
+                  <Text style={styles.pickerSub}>Show offers from a specific distributor only.</Text>
+                  <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 12 }}>
+                    <TouchableOpacity
+                      style={[styles.pickerRow, !distFilter && styles.pickerRowActive]}
+                      onPress={() => { setDistFilter(null); setDistFilterOpen(false); }}
+                    >
+                      <Ionicons name="apps" size={18} color={!distFilter ? colors.primary : colors.textSecondary} />
+                      <Text style={[styles.pickerRowText, !distFilter && { color: colors.primary, fontWeight: "800" }]}>All Distributors</Text>
+                      {!distFilter && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                    </TouchableOpacity>
+                    {allDistributors.map((d: any) => (
+                      <TouchableOpacity
+                        key={d.id}
+                        style={[styles.pickerRow, distFilter === d.id && styles.pickerRowActive]}
+                        onPress={() => { setDistFilter(d.id); setDistFilterOpen(false); }}
+                      >
+                        <Ionicons name="business" size={18} color={distFilter === d.id ? colors.primary : colors.textSecondary} />
+                        <Text style={[styles.pickerRowText, distFilter === d.id && { color: colors.primary, fontWeight: "800" }]}>{d.short_name || d.name}</Text>
+                        {distFilter === d.id && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </Pressable>
+              </Pressable>
+            </Modal>
+          </>
         )}
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -576,4 +695,50 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   modeCancelText: { color: colors.textSecondary, fontWeight: "700", fontSize: 13 },
+
+  // Mapped/Non-Mapped tabs + Distributor filter
+  subHeader: {
+    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+    backgroundColor: colors.bg,
+  },
+  subTabsRow: { flexDirection: "row", gap: 18, marginBottom: 10 },
+  subTab: { paddingBottom: 8, borderBottomWidth: 2, borderBottomColor: "transparent" },
+  subTabActive: { borderBottomColor: colors.primary },
+  subTabText: { color: colors.textSecondary, fontWeight: "700", fontSize: 14 },
+  subTabTextActive: { color: colors.primary },
+  filterRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  distFilterChip: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border,
+    borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6,
+    maxWidth: 240,
+  },
+  distFilterText: { color: colors.text, fontSize: 12.5, fontWeight: "700", maxWidth: 160 },
+  clearFilter: { padding: 2 },
+
+  // Distributor picker modal
+  pickerBackdrop: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end",
+  },
+  pickerSheet: {
+    backgroundColor: colors.bg,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 22,
+    borderTopLeftRadius: 22, borderTopRightRadius: 22,
+  },
+  pickerHandle: { width: 36, height: 4, backgroundColor: colors.border, borderRadius: 999, alignSelf: "center", marginBottom: 14 },
+  pickerTitle: { color: colors.text, fontSize: 17, fontWeight: "800", letterSpacing: -0.3 },
+  pickerSub: { color: colors.textSecondary, fontSize: 12, marginTop: 3, marginBottom: 14 },
+  pickerRow: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    paddingVertical: 12, paddingHorizontal: 10,
+    borderRadius: 12,
+  },
+  pickerRowActive: { backgroundColor: colors.primaryBg },
+  pickerRowText: { flex: 1, color: colors.text, fontSize: 14, fontWeight: "600" },
+
+  emptyAction: { marginTop: 8, paddingVertical: 6 },
+  emptyActionText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
+  emptySub: { color: colors.textTertiary, fontSize: 11.5, textAlign: "center", marginTop: 4 },
 });

@@ -434,7 +434,37 @@
         agent: "main"
         comment: "New screen /dist-invoices/[id] shows gradient hero with outstanding amount, overdue + open counts, in-hero Credit Used progress bar (color-coded green/amber/red). Two tabs: Open (N) and History (N). Open tab supports multi-select via tap-to-toggle checkboxes; floating sticky pay-bar appears at bottom with running total + 'Pay Lump Sum' gradient button (calls POST /api/payments/pay-lump-sum). 'Select All' chip toggles all open invoices; 'Overdue (N)' chip auto-selects only overdue. Overdue rows have red left border + 'OVERDUE' pill. History tab shows paid invoices with green tick. Each row has 'View →' to open /invoice/[id]. Wired from: (1) Ledger hero 'Pay' button → /dist-invoices/{id}, (2) Distributor profile hero now has 5 action pills with new 'Bills' pill → /dist-invoices/{id}. Verified end-to-end via Playwright: select-all/clear-all toggle works, history tab loads paid invoices, hero metrics render correctly, lump-sum button shows accurate total."
 
-  - task: "AI Camera/OCR scan with mode picker (medicine vs prescription), add-to-cart with steppers, in-cart awareness, Drug+Food license fields, search bars in lists, credit-conditional UI"
+  - task: "Search Mapped/Non-Mapped tabs + Distributor filter + Qty-input batch add + Product Detail redesign (Compare/Substitute/Variant)"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/search.tsx + /app/frontend/app/product/[id].tsx + /app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Client UI overhaul per reference screenshots:
+          
+          ## Search Screen
+          1. **Mapped / Non-Mapped tabs** — Mapped shows products in catalog with offers, Non-Mapped shows same-salt alternate-brand suggestions. Active tab gets primary-color underline + badge count.
+          2. **"All Distributors" filter chip** with chevron — taps open a bottom-sheet picker listing every distributor; selecting one filters all visible cards down to that distributor's offers (cards whose distributor has no offer are hidden). A close-circle clears the filter.
+          3. **`QtyInputAdd` component** — replaces the simple "+ Add" button. Shows: `[Qty input] [➕ button]` when item not in cart. Type "5" + tap ➕ → batch-adds 5 units at once. When already in cart, transforms into `[− N +]` stepper. Stock limit guards via toast.
+          
+          ## Product Detail Page (full redesign matching Image 2 reference)
+          1. **Backend `/products/{pid}`** now returns: `offers` (per-distributor full pricing — ptr, mrp, scheme, margin_pct, qty_available, dist_discount_pct, gst_pct, expiry, delivery_time, rating), `variants` (same salt + same manufacturer, different strength/pack), `substitutes` (same salt, different manufacturer).
+          2. **Header card** — product name, pack, MFR (caps), pill emoji thumb.
+          3. **Best Distributor card** — name with shield icon, delivery time, Qty/Scheme/Exp on right.
+          4. **GST + Dist. Discount pills** matching reference layout.
+          5. **MRP / PTR card** with floating green "MARGIN N%" badge.
+          6. **Compare / Substitute / Variant tabs** with green active underline + badge counts.
+          7. **By Popularity • Sort** header for Compare tab, with inline sort dropdown (Popularity / Price Low / Best Margin).
+          8. **Compare rows** — distributor + stars + delivery + scheme + 📦 stock pill + expiry + PTR/MRP/margin + per-row QtyInputAdd.
+          9. **Substitute & Variant rows** — clean product rows tappable to navigate.
+          10. **Sticky bottom Add-to-cart** with best distributor pricing + QtyInputAdd.
+          
+          Verified via Playwright (mobile 390x844): Search shows Mapped(14)/Non-Mapped(0) tabs, distributor picker modal opens with all 5 distributors, selecting one filters offers + shows "Sun Wholesale" pill, switching to Non-Mapped shows friendly empty state explaining tab behaviour. Product detail Azee 500 renders all sections: best-distributor card, GST/Dist.Discount pills, MRP/PTR with MARGIN 35% badge, Compare(3)/Substitute(4)/Variant tabs, Substitute tab shows 4 alternate brands (Azithral, Azax, Zady, Trulimax) with prices, sticky bottom Add-to-cart with ₹51 / MRP ₹79.
     implemented: true
     working: true
     file: "/app/backend/server.py + /app/frontend/app/scan-result.tsx + many"
