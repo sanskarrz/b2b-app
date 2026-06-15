@@ -72,6 +72,16 @@ Designs sourced from user's Figma "Medical Order App" page (file: Recovery-Call-
 - **Credit risk warning** on home: Surfaces credit usage % per distributor to prevent rejected orders.
 - **Best distributor flag** on product detail: Always highlights the lowest-PTR vendor to maximize margin per SKU.
 
+## Distributor side (COMPLETE — connected to pharmacist side)
+- **Role switch**: Pharmacist More → "Switch to Distributor mode" → `/d/home` (and back). Demo owns `dist-1` / "ABC Pharma".
+- **Per-customer credit engine** (`customer_credit` collection, keyed by distributor_id+user_id): both pharmacist ("my credit with X") and distributor ("credit I gave Y") read the SAME record. Auto-updates on order, collection, credit note, return, short-delivery.
+- **Distributor tabs**: Home (KPIs/chart/quick tiles/messages badge) · Orders · Stock · Customers · **Money/Collections** · More.
+- **Collections** (`/d/collections`): receivables KPIs (outstanding/overdue/collected-30d/due-this-week), Open/Overdue/Due/History filters, Record Payment (full/partial, cash/upi/cheque/neft) → settles invoice + drops customer credit + reflects on pharmacist ledger.
+- **Customer detail** (`/d/customer/[id]`): credit bar + Edit limit, business stats, Credit/Debit note issuance, Collect on open invoices, full ledger with running balance, Call/WhatsApp/Chat.
+- **Message portal** (`/d/messages`): two-way chat threads per customer (unread counts), 1-on-1 thread; distributor replies are seen by pharmacist and vice-versa.
+- Backend: 25/25 tests pass; full pharmacist regression green. All actions are real DB writes (no payment gateway — distributor records cash/UPI/cheque collection, as in real pharma distribution).
+
+
 ## Known limitations / next steps
 - OTP delivery is DEV mode (returned in API); needs SendGrid for production
 - Payment "Pay" button currently marks invoice paid locally — needs UPI/payment gateway
