@@ -434,6 +434,34 @@
         agent: "main"
         comment: "New screen /dist-invoices/[id] shows gradient hero with outstanding amount, overdue + open counts, in-hero Credit Used progress bar (color-coded green/amber/red). Two tabs: Open (N) and History (N). Open tab supports multi-select via tap-to-toggle checkboxes; floating sticky pay-bar appears at bottom with running total + 'Pay Lump Sum' gradient button (calls POST /api/payments/pay-lump-sum). 'Select All' chip toggles all open invoices; 'Overdue (N)' chip auto-selects only overdue. Overdue rows have red left border + 'OVERDUE' pill. History tab shows paid invoices with green tick. Each row has 'View →' to open /invoice/[id]. Wired from: (1) Ledger hero 'Pay' button → /dist-invoices/{id}, (2) Distributor profile hero now has 5 action pills with new 'Bills' pill → /dist-invoices/{id}. Verified end-to-end via Playwright: select-all/clear-all toggle works, history tab loads paid invoices, hero metrics render correctly, lump-sum button shows accurate total."
 
+  - task: "AI Camera/OCR scan with mode picker (medicine vs prescription), add-to-cart with steppers, in-cart awareness, Drug+Food license fields, search bars in lists, credit-conditional UI"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py + /app/frontend/app/scan-result.tsx + many"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Massive value-pack:
+          ## Backend
+          1. **Enhanced `/scan/extract`** — accepts `mode` ("medicine" | "prescription" | "auto"); three different system prompts tuned per mode; returns structured schema `{ mode, extracted, matches: [{ scanned: {label,name,salt,strength,pack,manufacturer,qty}, product, best_distributor, alternatives }] }`. Better token-based catalog matching with strength-preference ranking and up to 2 alternates per medicine. Graceful empty handling.
+          2. **New `GET /api/cart/lookup`** — returns `{items: {"<pid>::<did>": {item_id, qty}}, count, unique}` so the UI can show "in cart (qty)" everywhere without fetching the full cart.
+          3. **User model + Onboard + Profile** — added `drug_license` + `food_license` fields, persisted and returned by `/auth/me`.
+
+          ## Frontend
+          1. **`useCartLookup` hook + `QtyStepper` component** — singleton in-memory cache subscribed via event emitter; optimistic updates with revert-on-error; auto-refresh on screen focus.
+          2. **Search screen** — every offer row now shows either `+ Add` OR `− N +` stepper when item is already in cart. Multiple distributors per product each track their own qty. Stock-limit guard via toast.
+          3. **Scan mode picker modal** — bottom-sheet prompt before camera launches: "Medicine Box / Strip" or "Prescription / Bill", each with description and dedicated icon.
+          4. **Redesigned `/scan-result.tsx`** — gradient mode-aware hero, scan-label per item, qty badge for prescription multi-qty, matched product card with QtyStepper + best-distributor pill + delivery time, "Search manually" CTA for unmatched, alternates list, sticky "Add all N to cart" bottom bar.
+          5. **Onboarding + Profile forms** — added Drug License (Form 20/21B regex) + FSSAI (14-digit numeric) fields with inline validation + helper text + character limits.
+          6. **Search bars** added to Orders tab (search by code, distributor, status, amount) and Ledger entries (search invoice code, notes, amount, type).
+          7. **Credit accuracy** — Home Action Required card and Payments tab vendor cards now conditionally render credit-used UI: when `credit_used === 0`, shows `✓ No credit taken • ₹X available` instead of empty progress bar/warning. Home dynamically labels the card "Credit Risk Warning" / "Credit Status" based on usage tier.
+          
+          Verified live: scan modal opens with both options; orders search filters and shows "No orders match" empty state; profile shows Drug License + FSSAI; search results show — N + stepper on rows already in cart (5 units from earlier session) while other distributors show "Add". Backend 15/15 tests pass.
+
   - task: "Global error handling & inline form validation"
     implemented: true
     working: true
