@@ -2,7 +2,7 @@
 RX Tech – B2B Medicine Marketplace Backend
 FastAPI + MongoDB, JWT-based session with Email OTP.
 """
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Body, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -113,6 +113,9 @@ class User(BaseModel):
     food_license: Optional[str] = None
     onboarded: bool = False
     created_at: str
+    # NEW: roles & distributor-owner link
+    roles: List[str] = ["pharmacist"]  # "pharmacist" | "distributor"
+    owned_distributor_id: Optional[str] = None  # distributor.id if this user owns one
 
 
 class Distributor(BaseModel):
@@ -2433,6 +2436,489 @@ async def distributor_dashboard(distributor_id: str = "dist-1"):
 @api_router.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ============================================================================
+# DISTRIBUTOR-SIDE PLATFORM
+# ============================================================================
+
+import secrets as _secrets
+
+
+async def get_owned_distributor(user: dict) -> dict:
+    """Return the Distributor record owned by this user, or 403."""
+    did = user.get("owned_distributor_id")
+    if not did:
+        # Try fallback by email match (demo@rxtech.com → dist-1)
+        u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+        did = (u or {}).get("owned_distributor_id")
+    if not did:
+        raise HTTPException(403, "You do not own a distributor account")
+    d = await db.distributors.find_one({"id": did}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Distributor not found")
+    return d
+
+
+@api_router.post("/distributor/switch-role")
+async def switch_role(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Demo helper: ensures the current user has the distributor role and is linked
+    to a distributor (defaults to dist-1 if none)."""
+    target = payload.get("role")
+    if target not in ("pharmacist", "distributor"):
+        raise HTTPException(400, "Invalid role")
+    upd = {}
+    if target == "distributor":
+        # Ensure user has distributor role and is linked to a distributor
+        u = await db.users.find_one({"id": user["id"]}, {"_id": 0}) or {}
+        roles = set(u.get("roles") or ["pharmacist"])
+        roles.add("distributor")
+        upd["roles"] = list(roles)
+        if not u.get("owned_distributor_id"):
+            # link to dist-1 for demo
+            upd["owned_distributor_id"] = "dist-1"
+    await db.users.update_one({"id": user["id"]}, {"$set": upd}) if upd else None
+    fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    return {"active_role": target, "user": fresh}
+
+
+@api_router.get("/distributor/me")
+async def distributor_me(user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    # how many products this distributor offers
+    count = await db.products.count_documents({"distributor_ids": d["id"]})
+    return {"distributor": d, "product_count": count}
+
+
+@api_router.get("/distributor/me/dashboard")
+async def distributor_dashboard(user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    today = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
+    pending = await db.orders.count_documents({"distributor_id": d["id"], "status": {"$in": ["placed", "accepted"]}})
+    dispatched = await db.orders.count_documents({"distributor_id": d["id"], "status": "dispatched"})
+    delivered_today = await db.orders.count_documents({
+        "distributor_id": d["id"], "status": "delivered",
+        "created_at": {"$gte": iso(today)},
+    })
+
+    # Today sales (sum of total of delivered orders today)
+    today_orders = await db.orders.find(
+        {"distributor_id": d["id"], "created_at": {"$gte": iso(today)}}, {"_id": 0},
+    ).to_list(500)
+    today_sales = sum(o.get("total", 0) for o in today_orders)
+    today_orders_count = len(today_orders)
+
+    # Last 7 days sales chart
+    from datetime import timedelta
+    series = []
+    for i in range(6, -1, -1):
+        day_start = (today - timedelta(days=i))
+        day_end = day_start + timedelta(days=1)
+        day_orders = await db.orders.find(
+            {"distributor_id": d["id"], "created_at": {"$gte": iso(day_start), "$lt": iso(day_end)}}, {"_id": 0},
+        ).to_list(500)
+        series.append({"label": day_start.strftime("%a"), "sales": sum(o.get("total", 0) for o in day_orders), "orders": len(day_orders)})
+
+    # Outstanding (credit owed by all customers to this distributor)
+    outstanding_agg = await db.payments.aggregate([
+        {"$match": {"distributor_id": d["id"], "status": {"$in": ["pending", "overdue"]}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+    ]).to_list(1)
+    outstanding = outstanding_agg[0] if outstanding_agg else {"total": 0, "count": 0}
+
+    # Top customer (by total order value lifetime)
+    top_agg = await db.orders.aggregate([
+        {"$match": {"distributor_id": d["id"]}},
+        {"$group": {"_id": "$user_id", "total": {"$sum": "$total"}, "orders": {"$sum": 1}}},
+        {"$sort": {"total": -1}},
+        {"$limit": 5},
+    ]).to_list(5)
+    top_customers = []
+    for row in top_agg:
+        u = await db.users.find_one({"id": row["_id"]}, {"_id": 0, "name": 1, "email": 1, "shop_name": 1})
+        if u:
+            top_customers.append({
+                "user_id": row["_id"], "name": u.get("name") or u.get("email"),
+                "shop_name": u.get("shop_name"), "total": row["total"], "orders": row["orders"],
+            })
+
+    # Low stock products (count with qty_available <= 20)
+    low_stock = await db.products.count_documents({
+        "prices": {"$elemMatch": {"distributor_id": d["id"], "qty_available": {"$lte": 20, "$gt": 0}}},
+    })
+    out_of_stock = await db.products.count_documents({
+        "prices": {"$elemMatch": {"distributor_id": d["id"], "qty_available": 0}},
+    })
+
+    return {
+        "distributor": d,
+        "pending_orders": pending,
+        "dispatched_orders": dispatched,
+        "delivered_today": delivered_today,
+        "today_sales": today_sales,
+        "today_orders_count": today_orders_count,
+        "outstanding": outstanding,
+        "sales_chart": series,
+        "top_customers": top_customers,
+        "low_stock": low_stock,
+        "out_of_stock": out_of_stock,
+        "credit_limit": d.get("credit_limit", 0),
+        "credit_used": d.get("credit_used", 0),
+    }
+
+
+@api_router.get("/distributor/me/orders")
+async def distributor_orders(
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    d = await get_owned_distributor(user)
+    query: dict = {"distributor_id": d["id"]}
+    if status and status != "all":
+        query["status"] = status
+    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    # Enrich with customer info
+    user_ids = list({o["user_id"] for o in orders})
+    users = {u["id"]: u for u in await db.users.find({"id": {"$in": user_ids}}, {"_id": 0}).to_list(200)}
+    for o in orders:
+        u = users.get(o["user_id"]) or {}
+        o["customer_name"] = u.get("shop_name") or u.get("name") or u.get("email")
+        o["customer_phone"] = u.get("phone")
+        o["customer_email"] = u.get("email")
+    if q:
+        qq = q.lower().strip()
+        orders = [o for o in orders if qq in (o.get("code", "").lower()) or qq in (o.get("customer_name", "").lower())]
+    return orders
+
+
+@api_router.post("/distributor/orders/{order_id}/action")
+async def distributor_order_action(
+    order_id: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """action = 'accept' | 'dispatch' | 'deliver' | 'cancel'"""
+    d = await get_owned_distributor(user)
+    action = payload.get("action")
+    note = payload.get("note") or None
+    valid_transitions = {
+        "accept": (["placed"], "accepted"),
+        "dispatch": (["placed", "accepted"], "dispatched"),
+        "deliver": (["dispatched"], "delivered"),
+        "cancel": (["placed", "accepted"], "cancelled"),
+    }
+    if action not in valid_transitions:
+        raise HTTPException(400, f"Invalid action. Must be one of: {list(valid_transitions.keys())}")
+    allowed, new_status = valid_transitions[action]
+    order = await db.orders.find_one({"id": order_id, "distributor_id": d["id"]}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if order["status"] not in allowed:
+        raise HTTPException(400, f"Cannot {action} from {order['status']}")
+    updates: dict = {"status": new_status}
+    timeline = order.get("timeline", []) + [{
+        "status": new_status, "at": iso(now_utc()), "by": "distributor", "note": note,
+    }]
+    updates["timeline"] = timeline
+    if action == "dispatch":
+        updates["dispatched_at"] = iso(now_utc())
+    elif action == "deliver":
+        updates["delivered_at"] = iso(now_utc())
+    elif action == "cancel":
+        updates["cancelled_at"] = iso(now_utc())
+    await db.orders.update_one({"id": order_id}, {"$set": updates})
+    return {"success": True, "status": new_status}
+
+
+@api_router.get("/distributor/me/inventory")
+async def distributor_inventory(
+    q: Optional[str] = None,
+    only: Optional[str] = None,  # 'low' | 'out' | 'in'
+    user: dict = Depends(get_current_user),
+):
+    d = await get_owned_distributor(user)
+    query: dict = {"distributor_ids": d["id"]}
+    if q:
+        query["$or"] = [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"salt": {"$regex": q, "$options": "i"}},
+            {"manufacturer": {"$regex": q, "$options": "i"}},
+        ]
+    products = await db.products.find(query, {"_id": 0}).to_list(1000)
+    items = []
+    for p in products:
+        my_price = next((pr for pr in (p.get("prices") or []) if pr["distributor_id"] == d["id"]), None)
+        if not my_price:
+            continue
+        qty = my_price.get("qty_available", 0) or 0
+        if only == "low" and not (0 < qty <= 20):
+            continue
+        if only == "out" and qty != 0:
+            continue
+        if only == "in" and qty <= 20:
+            continue
+        items.append({
+            "product_id": p["id"],
+            "name": p["name"],
+            "salt": p["salt"],
+            "manufacturer": p["manufacturer"],
+            "pack": p.get("pack"),
+            "image_emoji": p.get("image_emoji", "💊"),
+            "mrp": my_price.get("mrp", p.get("mrp")),
+            "ptr": my_price.get("ptr", p.get("ptr")),
+            "scheme": my_price.get("scheme"),
+            "margin_pct": my_price.get("margin_pct"),
+            "qty_available": qty,
+            "stock_status": "out" if qty == 0 else "low" if qty <= 20 else "in",
+            "expiry": my_price.get("expiry"),
+            "dist_discount_pct": my_price.get("dist_discount_pct", 0),
+            "gst_pct": my_price.get("gst_pct", 12.0),
+        })
+    return items
+
+
+class InventoryUpdate(BaseModel):
+    ptr: Optional[float] = None
+    mrp: Optional[float] = None
+    qty_available: Optional[int] = None
+    scheme: Optional[str] = None
+    dist_discount_pct: Optional[float] = None
+    expiry: Optional[str] = None
+
+
+@api_router.patch("/distributor/me/inventory/{product_id}")
+async def distributor_inventory_update(
+    product_id: str,
+    payload: InventoryUpdate,
+    user: dict = Depends(get_current_user),
+):
+    d = await get_owned_distributor(user)
+    p = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Product not found")
+    prices = p.get("prices") or []
+    found = False
+    for pr in prices:
+        if pr["distributor_id"] == d["id"]:
+            found = True
+            for k in ("ptr", "mrp", "qty_available", "scheme", "dist_discount_pct", "expiry"):
+                v = getattr(payload, k)
+                if v is not None:
+                    pr[k] = v
+            # recompute margin if ptr or mrp changed
+            try:
+                if pr.get("mrp") and pr.get("ptr"):
+                    pr["margin_pct"] = round(((pr["mrp"] - pr["ptr"]) / pr["mrp"]) * 100, 1)
+            except Exception:
+                pass
+            break
+    if not found:
+        raise HTTPException(404, "This distributor does not stock this product")
+    await db.products.update_one({"id": product_id}, {"$set": {"prices": prices}})
+    return {"success": True}
+
+
+@api_router.get("/distributor/me/customers")
+async def distributor_customers(
+    q: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    d = await get_owned_distributor(user)
+    # All users who have ordered from this distributor
+    agg = await db.orders.aggregate([
+        {"$match": {"distributor_id": d["id"]}},
+        {"$group": {
+            "_id": "$user_id",
+            "total_spent": {"$sum": "$total"},
+            "orders": {"$sum": 1},
+            "last_order_at": {"$max": "$created_at"},
+        }},
+    ]).to_list(500)
+    user_ids = [r["_id"] for r in agg]
+    users = {u["id"]: u for u in await db.users.find({"id": {"$in": user_ids}}, {"_id": 0}).to_list(500)}
+    # Outstanding per user (sum of pending payments to this distributor)
+    pay_agg = await db.payments.aggregate([
+        {"$match": {"distributor_id": d["id"], "status": {"$in": ["pending", "overdue"]}}},
+        {"$group": {"_id": "$user_id", "outstanding": {"$sum": "$amount"}, "overdue_count": {"$sum": {"$cond": [{"$eq": ["$status", "overdue"]}, 1, 0]}}}},
+    ]).to_list(500)
+    pay_map = {p["_id"]: p for p in pay_agg}
+    rows = []
+    for r in agg:
+        u = users.get(r["_id"])
+        if not u:
+            continue
+        pay = pay_map.get(r["_id"], {"outstanding": 0, "overdue_count": 0})
+        rows.append({
+            "user_id": r["_id"],
+            "name": u.get("shop_name") or u.get("name") or u.get("email"),
+            "contact_name": u.get("name"),
+            "email": u.get("email"),
+            "phone": u.get("phone"),
+            "address": u.get("address"),
+            "drug_license": u.get("drug_license"),
+            "gst": u.get("gst"),
+            "total_spent": r["total_spent"],
+            "orders": r["orders"],
+            "last_order_at": r["last_order_at"],
+            "outstanding": pay["outstanding"],
+            "overdue_count": pay["overdue_count"],
+        })
+    if q:
+        qq = q.lower()
+        rows = [r for r in rows if qq in (r["name"] or "").lower() or qq in (r["email"] or "").lower() or qq in (r["phone"] or "").lower()]
+    rows.sort(key=lambda x: x["total_spent"], reverse=True)
+    return rows
+
+
+# ============================================================================
+# ERP API KEYS
+# ============================================================================
+
+@api_router.get("/distributor/me/api-keys")
+async def list_api_keys(user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    keys = await db.api_keys.find({"distributor_id": d["id"]}, {"_id": 0, "key_secret": 0}).to_list(50)
+    return keys
+
+
+@api_router.post("/distributor/me/api-keys")
+async def create_api_key(payload: dict = Body(default={}), user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    label = (payload.get("label") or "ERP Integration").strip()
+    raw = "rxt_live_" + _secrets.token_urlsafe(32)
+    item = {
+        "id": str(uuid.uuid4()),
+        "distributor_id": d["id"],
+        "label": label,
+        "key_prefix": raw[:14] + "…",
+        "key_secret": raw,  # we keep the full key in the doc for demo simplicity
+        "created_at": iso(now_utc()),
+        "last_used_at": None,
+        "active": True,
+    }
+    await db.api_keys.insert_one({**item})
+    # Return the secret only on creation
+    return {"id": item["id"], "label": label, "key": raw, "key_prefix": item["key_prefix"], "created_at": item["created_at"]}
+
+
+@api_router.delete("/distributor/me/api-keys/{key_id}")
+async def revoke_api_key(key_id: str, user: dict = Depends(get_current_user)):
+    d = await get_owned_distributor(user)
+    r = await db.api_keys.update_one({"id": key_id, "distributor_id": d["id"]}, {"$set": {"active": False}})
+    if r.modified_count == 0:
+        raise HTTPException(404, "Key not found")
+    return {"success": True}
+
+
+# ============================================================================
+# ERP-FACING ENDPOINTS (Authenticated via X-API-Key header)
+# These are designed to be called from a distributor's own ERP/back-office.
+# ============================================================================
+
+async def get_erp_distributor(x_api_key: Optional[str] = Header(default=None, alias="X-API-Key")) -> dict:
+    if not x_api_key:
+        raise HTTPException(401, "X-API-Key header required")
+    key_doc = await db.api_keys.find_one({"key_secret": x_api_key, "active": True}, {"_id": 0})
+    if not key_doc:
+        raise HTTPException(401, "Invalid or revoked API key")
+    await db.api_keys.update_one({"id": key_doc["id"]}, {"$set": {"last_used_at": iso(now_utc())}})
+    d = await db.distributors.find_one({"id": key_doc["distributor_id"]}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Distributor not found")
+    return d
+
+
+@api_router.get("/erp/v1/me")
+async def erp_me(d: dict = Depends(get_erp_distributor)):
+    return {"distributor_id": d["id"], "name": d["name"], "short_name": d["short_name"]}
+
+
+@api_router.get("/erp/v1/orders")
+async def erp_orders(
+    status: Optional[str] = None,
+    since: Optional[str] = None,
+    limit: int = 100,
+    d: dict = Depends(get_erp_distributor),
+):
+    q: dict = {"distributor_id": d["id"]}
+    if status:
+        q["status"] = status
+    if since:
+        q["created_at"] = {"$gte": since}
+    orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).to_list(min(limit, 500))
+    return {"count": len(orders), "orders": orders}
+
+
+@api_router.post("/erp/v1/orders/{order_id}/dispatch")
+async def erp_dispatch(order_id: str, payload: dict = Body(default={}), d: dict = Depends(get_erp_distributor)):
+    note = payload.get("note") or "Dispatched via ERP"
+    order = await db.orders.find_one({"id": order_id, "distributor_id": d["id"]}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if order["status"] not in ("placed", "accepted"):
+        raise HTTPException(400, f"Cannot dispatch from {order['status']}")
+    timeline = order.get("timeline", []) + [{"status": "dispatched", "at": iso(now_utc()), "by": "erp", "note": note}]
+    await db.orders.update_one({"id": order_id}, {"$set": {"status": "dispatched", "dispatched_at": iso(now_utc()), "timeline": timeline}})
+    return {"success": True, "status": "dispatched"}
+
+
+class BulkInventoryItem(BaseModel):
+    product_id: str
+    ptr: Optional[float] = None
+    mrp: Optional[float] = None
+    qty_available: Optional[int] = None
+    scheme: Optional[str] = None
+    expiry: Optional[str] = None
+
+
+@api_router.post("/erp/v1/inventory/bulk-update")
+async def erp_bulk_inventory(items: List[BulkInventoryItem], d: dict = Depends(get_erp_distributor)):
+    updated = 0
+    skipped: List[str] = []
+    for it in items:
+        p = await db.products.find_one({"id": it.product_id}, {"_id": 0})
+        if not p:
+            skipped.append(it.product_id)
+            continue
+        prices = p.get("prices") or []
+        found = False
+        for pr in prices:
+            if pr["distributor_id"] == d["id"]:
+                found = True
+                for k in ("ptr", "mrp", "qty_available", "scheme", "expiry"):
+                    v = getattr(it, k)
+                    if v is not None:
+                        pr[k] = v
+                try:
+                    if pr.get("mrp") and pr.get("ptr"):
+                        pr["margin_pct"] = round(((pr["mrp"] - pr["ptr"]) / pr["mrp"]) * 100, 1)
+                except Exception:
+                    pass
+                break
+        if not found:
+            skipped.append(it.product_id)
+            continue
+        await db.products.update_one({"id": it.product_id}, {"$set": {"prices": prices}})
+        updated += 1
+    return {"updated": updated, "skipped": skipped, "total_requested": len(items)}
+
+
+@api_router.get("/erp/v1/inventory")
+async def erp_get_inventory(d: dict = Depends(get_erp_distributor)):
+    products = await db.products.find({"distributor_ids": d["id"]}, {"_id": 0}).to_list(2000)
+    rows = []
+    for p in products:
+        my = next((pr for pr in (p.get("prices") or []) if pr["distributor_id"] == d["id"]), None)
+        if not my:
+            continue
+        rows.append({
+            "product_id": p["id"], "name": p["name"], "salt": p["salt"],
+            "pack": p.get("pack"), "ptr": my.get("ptr"), "mrp": my.get("mrp"),
+            "qty_available": my.get("qty_available"), "scheme": my.get("scheme"),
+            "expiry": my.get("expiry"),
+        })
+    return {"count": len(rows), "items": rows}
 
 
 # Register router
