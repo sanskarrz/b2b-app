@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { api } from "@/src/api";
+import { shareCustomerStatement } from "@/src/utils/statement";
 import { showError, showSuccess } from "@/src/components/Toast";
 import { colors, radius, formatINR, formatINRFull } from "@/src/theme";
 
@@ -29,6 +30,19 @@ export default function DistributorCustomerDetail() {
   const [noteReason, setNoteReason] = useState("damaged");
   const [noteText, setNoteText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [sharing, setSharing] = useState(false);
+
+  const shareStatement = async () => {
+    setSharing(true);
+    try {
+      const r = await shareCustomerStatement(String(id));
+      if (r.reason === "printed") showSuccess("Statement opened — use your browser to Save as PDF");
+    } catch (e: any) {
+      showError(e?.message || "Could not generate statement", "Statement failed");
+    } finally {
+      setSharing(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -132,6 +146,16 @@ export default function DistributorCustomerDetail() {
           <View style={styles.barBg}><View style={[styles.barFill, { width: `${Math.min(usedPct, 100)}%`, backgroundColor: barColor }]} /></View>
           <Text style={styles.creditMeta}>{usedPct}% of {formatINRFull(cr.credit_limit)} limit • {cr.credit_days}d terms • {cr.settlement_discount_pct}% early-settle</Text>
         </View>
+
+        {/* Share account statement (WhatsApp / Email / etc.) */}
+        <TouchableOpacity style={styles.statementBtn} onPress={shareStatement} disabled={sharing} testID="share-statement">
+          {sharing ? <ActivityIndicator color="#FFF" /> : (
+            <>
+              <Ionicons name="logo-whatsapp" size={17} color="#FFF" />
+              <Text style={styles.statementBtnText}>Share Account Statement</Text>
+            </>
+          )}
+        </TouchableOpacity>
 
         {/* Business stats */}
         <View style={styles.statsGrid}>
@@ -319,6 +343,9 @@ const styles = StyleSheet.create({
   barBg: { height: 8, backgroundColor: colors.surface, borderRadius: 999, marginTop: 12, overflow: "hidden" },
   barFill: { height: 8, borderRadius: 999 },
   creditMeta: { color: colors.textSecondary, fontSize: 11, marginTop: 8 },
+
+  statementBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 12, marginTop: 12, paddingVertical: 13, borderRadius: radius.md, backgroundColor: "#25D366" },
+  statementBtnText: { color: "#FFF", fontWeight: "800", fontSize: 14 },
 
   statsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 12, marginTop: 12 },
   statCard: { flexGrow: 1, flexBasis: "47%", backgroundColor: "#FFF", padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },

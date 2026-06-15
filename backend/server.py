@@ -3340,6 +3340,72 @@ async def distributor_issue_debit_note(cust_id: str, req: DistNoteReq, user: dic
     return {"success": True, "item": dn}
 
 
+@api_router.get("/distributor/me/customers/{cust_id}/statement")
+async def distributor_customer_statement(cust_id: str, user: dict = Depends(get_current_user)):
+    """Full account statement data for a customer (used to render a shareable PDF)."""
+    d = await get_owned_distributor(user)
+    cust = await db.users.find_one({"id": cust_id}, {"_id": 0})
+    if not cust:
+        raise HTTPException(404, "Customer not found")
+    orders = await db.orders.find({"user_id": cust_id, "distributor_id": d["id"]}, {"_id": 0}).to_list(1000)
+    payments = await db.payments.find({"user_id": cust_id, "distributor_id": d["id"]}, {"_id": 0}).to_list(1000)
+    credit_notes = await db.credit_notes.find({"user_id": cust_id, "distributor_id": d["id"]}, {"_id": 0}).to_list(500)
+    debit_notes = await db.debit_notes.find({"user_id": cust_id, "distributor_id": d["id"]}, {"_id": 0}).to_list(500)
+    cc = await cc_get(d["id"], cust_id)
+
+    entries = []
+    for o in orders:
+        entries.append({"type": "bill", "ref": o["code"], "label": f"Invoice {o['code']}",
+                        "date": o["created_at"], "debit": round(o["total"], 2), "credit": 0})
+    for p in payments:
+        if p["status"] == "paid":
+            entries.append({"type": "payment", "ref": p["invoice_code"], "label": f"Payment received ({(p.get('pay_method') or 'cash').upper()})",
+                            "date": p.get("paid_at") or p["due_date"], "debit": 0, "credit": round(p["amount"], 2)})
+    for cn in credit_notes:
+        entries.append({"type": "credit_note", "ref": cn["code"], "label": f"Credit Note · {cn['reason']}",
+                        "date": cn["created_at"], "debit": 0, "credit": round(cn["amount"], 2)})
+    for dn in debit_notes:
+        entries.append({"type": "debit_note", "ref": dn["code"], "label": f"Debit Note · {dn['reason']}",
+                        "date": dn["created_at"], "debit": round(dn["amount"], 2), "credit": 0})
+    entries.sort(key=lambda e: e["date"])
+    running = 0.0
+    for e in entries:
+        running += (e["debit"] - e["credit"])
+        e["balance"] = round(running, 2)
+
+    total_billed = round(sum(e["debit"] for e in entries), 2)
+    total_credited = round(sum(e["credit"] for e in entries), 2)
+    outstanding = round(sum(p["amount"] for p in payments if p["status"] in ("due", "overdue")), 2)
+    overdue = round(sum(p["amount"] for p in payments if p["status"] == "overdue"), 2)
+
+    return {
+        "distributor": {
+            "name": d.get("name") or d.get("short_name"),
+            "short_name": d.get("short_name"),
+            "gst": d.get("gst"), "address": d.get("address") or d.get("location"),
+            "phone": d.get("phone"), "location": d.get("location"),
+        },
+        "customer": {
+            "id": cust["id"], "name": cust.get("shop_name") or cust.get("name") or cust.get("email"),
+            "contact_name": cust.get("name"), "phone": cust.get("phone"),
+            "address": cust.get("address"), "gst": cust.get("gst"), "drug_license": cust.get("drug_license"),
+        },
+        "credit": {
+            "credit_limit": cc.get("credit_limit", 0), "credit_used": round(cc.get("credit_used", 0), 2),
+            "credit_available": round(cc.get("credit_limit", 0) - cc.get("credit_used", 0), 2),
+            "credit_days": cc.get("credit_days", 21),
+        },
+        "summary": {
+            "total_billed": total_billed, "total_credited": total_credited,
+            "outstanding": outstanding, "overdue": overdue,
+            "closing_balance": round(running, 2), "entry_count": len(entries),
+        },
+        "entries": entries,
+        "generated_at": iso(now_utc()),
+    }
+
+
+
 # ============================================================================
 # DISTRIBUTOR — MESSAGE PORTAL (two-way chat with customers)
 # ============================================================================
