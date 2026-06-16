@@ -1,6 +1,6 @@
 // Generate a customer account-statement PDF and share it (WhatsApp, email, etc.)
-import * as Print from "expo-print";
-import * as Sharing from "expo-sharing";
+// NOTE: expo-print / expo-sharing are imported lazily inside the function so that
+// these native modules never affect app startup or other screens.
 import { Platform } from "react-native";
 import { api } from "@/src/api";
 
@@ -116,6 +116,8 @@ function buildHtml(s: any): string {
  * (WhatsApp / Email / Drive…). Returns { ok, reason }.
  */
 export async function shareCustomerStatement(custId: string): Promise<{ ok: boolean; reason?: string }> {
+  const Print = await import("expo-print");
+  const Sharing = await import("expo-sharing");
   const data = await api(`/distributor/me/customers/${custId}/statement`);
   const html = buildHtml(data);
   const fileName = `Statement-${(data.customer?.name || "customer").replace(/[^a-z0-9]/gi, "-")}`;
