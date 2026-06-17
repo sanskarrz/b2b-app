@@ -40,6 +40,15 @@ export default function EmailEntry() {
     }
     setLoading(true);
     try {
+      const lm: any = await api("/auth/login-method", {
+        method: "POST",
+        body: { email: trimmed },
+        auth: false,
+      });
+      if (lm.method === "password") {
+        router.push({ pathname: "/auth/login", params: { email: trimmed, name: lm.name || "" } });
+        return;
+      }
       const res: any = await api("/auth/send-otp", {
         method: "POST",
         body: { email: trimmed },
@@ -50,7 +59,7 @@ export default function EmailEntry() {
         params: { email: trimmed, devOtp: res.dev_otp || "" },
       });
     } catch (e: any) {
-      showError(e?.message || "Could not send OTP. Please try again.", "Sign-in failed");
+      showError(e?.message || "Could not continue. Please try again.", "Sign-in failed");
     } finally {
       setLoading(false);
     }

@@ -12,6 +12,7 @@ import logging
 import random
 import string
 import jwt
+import bcrypt
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal
@@ -73,10 +74,46 @@ async def get_current_user(
         user_id = payload.get("sub")
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
-    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
+
+
+# Roles
+STAFF_PASSWORD_ROLES = {"manager", "field_sales", "delivery"}
+DISTRIBUTOR_ROLES = {"owner", "manager", "field_sales", "delivery"}
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def require_role(user: dict, allowed: set):
+    """Raise 403 unless the user's role is in `allowed`."""
+    role = user.get("role") or "pharmacist"
+    if role not in allowed:
+        raise HTTPException(status_code=403, detail="You don't have access to this action")
+    return role
+
+
+async def staff_distributor(user: dict, allowed: set) -> dict:
+    """Return the distributor this staff/owner belongs to, enforcing role."""
+    require_role(user, allowed)
+    did = user.get("owned_distributor_id") or user.get("distributor_id")
+    if not did:
+        raise HTTPException(status_code=403, detail="No distributor linked to this account")
+    d = await db.distributors.find_one({"id": did}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Distributor not found")
+    return d
 
 
 # ============================================================
@@ -417,6 +454,63 @@ async def verify_otp(payload: VerifyOTPRequest):
         await seed_demo_user_credit(user["id"])
 
     return {"success": True, "token": token, "user": user, "onboarded": user.get("onboarded", False)}
+
+
+class LoginMethodRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@api_router.post("/auth/login-method")
+async def login_method(payload: LoginMethodRequest):
+    """Tell the client whether this email logs in via password (staff) or OTP."""
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if user and user.get("password_hash") and (user.get("role") in STAFF_PASSWORD_ROLES):
+        return {"method": "password", "exists": True, "name": user.get("name"), "role": user.get("role")}
+    return {"method": "otp", "exists": bool(user)}
+
+
+@api_router.post("/auth/login")
+async def password_login(payload: PasswordLoginRequest):
+    """Email + password login for staff accounts (manager / field_sales / delivery)."""
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user or not user.get("password_hash") or not user.get("active", True):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    if not verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    token = create_token(user["id"])
+    user.pop("password_hash", None)
+    return {
+        "success": True, "token": token, "user": user, "onboarded": True,
+        "role": user.get("role"), "must_change_password": user.get("must_change_password", False),
+    }
+
+
+@api_router.post("/auth/change-password")
+async def change_password(payload: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    full = await db.users.find_one({"id": user["id"]})
+    if not full or not full.get("password_hash"):
+        raise HTTPException(400, "Password login not enabled for this account")
+    if not verify_password(payload.current_password, full["password_hash"]):
+        raise HTTPException(400, "Current password is incorrect")
+    if len(payload.new_password) < 6:
+        raise HTTPException(400, "New password must be at least 6 characters")
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"password_hash": hash_password(payload.new_password), "must_change_password": False}},
+    )
+    return {"success": True}
 
 
 @api_router.post("/auth/onboard")
@@ -3473,6 +3567,481 @@ async def distributor_send_chat(req: DistChatReq, user: dict = Depends(get_curre
 
 
 
+
+# ============================================================================
+# TEAM PLATFORM — staff accounts, delivery ops, field-sales CRM
+# ============================================================================
+async def seed_team_demo() -> None:
+    """Seed the distributor owner + staff (manager/field-sales/delivery) + leads
+    and assign demo deliveries. Idempotent."""
+    if await db.users.find_one({"email": "owner@rxtech.com"}):
+        return
+    base = now_utc()
+    pw = hash_password("Pass@123")
+
+    # Owner (OTP login, owns dist-1)
+    await db.users.insert_one({
+        "id": "owner-1", "email": "owner@rxtech.com", "name": "Rajesh Mehta",
+        "phone": "9810000001", "role": "owner", "owned_distributor_id": "dist-1",
+        "distributor_id": "dist-1", "onboarded": True, "active": True,
+        "created_at": iso(base - timedelta(days=400)),
+    })
+
+    staff = [
+        {"id": "mgr-1", "email": "manager@rxtech.com", "name": "Priya Nair", "phone": "9810000002", "role": "manager"},
+        {"id": "fs-1", "email": "sales@rxtech.com", "name": "Amit Verma", "phone": "9810000003", "role": "field_sales"},
+        {"id": "fs-2", "email": "sales2@rxtech.com", "name": "Kavya Reddy", "phone": "9810000004", "role": "field_sales"},
+        {"id": "dl-1", "email": "delivery@rxtech.com", "name": "Suresh Yadav", "phone": "9810000005", "role": "delivery"},
+        {"id": "dl-2", "email": "delivery2@rxtech.com", "name": "Manoj Singh", "phone": "9810000006", "role": "delivery"},
+    ]
+    for s in staff:
+        await db.users.insert_one({
+            **s, "password_hash": pw, "distributor_id": "dist-1", "owned_distributor_id": None,
+            "onboarded": True, "active": True, "must_change_password": False,
+            "created_by": "owner-1", "created_at": iso(base - timedelta(days=200)),
+        })
+
+    # Assign existing dispatched orders to a delivery rep
+    dispatched = await db.orders.find({"distributor_id": "dist-1", "status": "dispatched"}, {"_id": 0}).to_list(50)
+    for o in dispatched:
+        await db.orders.update_one({"id": o["id"]}, {"$set": {
+            "assigned_to": "dl-1", "assigned_to_name": "Suresh Yadav", "delivery_status": "assigned",
+        }})
+
+    # Field-sales leads
+    leads = [
+        {"shop_name": "Sunrise Medicals", "contact_name": "Vikram Joshi", "phone": "9890011111", "area": "Thane West", "status": "new", "assigned_to": "fs-1", "est_value": 80000},
+        {"shop_name": "HealthFirst Pharmacy", "contact_name": "Deepa Rao", "phone": "9890022222", "area": "Mulund", "status": "contacted", "assigned_to": "fs-1", "est_value": 120000},
+        {"shop_name": "MediPlus Store", "contact_name": "Arjun Kapoor", "phone": "9890033333", "area": "Ghatkopar", "status": "visited", "assigned_to": "fs-1", "est_value": 60000},
+        {"shop_name": "Care & Cure Chemist", "contact_name": "Neha Gupta", "phone": "9890044444", "area": "Kurla", "status": "new", "assigned_to": "fs-2", "est_value": 95000},
+        {"shop_name": "LifeLine Pharmacy", "contact_name": "Sanjay Patil", "phone": "9890055555", "area": "Sion", "status": "contacted", "assigned_to": "fs-2", "est_value": 70000},
+        {"shop_name": "Wellbeing Druggist", "contact_name": "Pooja Shah", "phone": "9890066666", "area": "Chembur", "status": "converted", "assigned_to": "fs-1", "est_value": 110000},
+    ]
+    names = {"fs-1": "Amit Verma", "fs-2": "Kavya Reddy"}
+    for i, l in enumerate(leads):
+        await db.leads.insert_one({
+            "id": f"lead-{i+1}", "distributor_id": "dist-1",
+            "shop_name": l["shop_name"], "contact_name": l["contact_name"], "phone": l["phone"],
+            "address": l["area"] + ", Mumbai", "area": l["area"], "status": l["status"],
+            "assigned_to": l["assigned_to"], "assigned_to_name": names[l["assigned_to"]],
+            "est_value": l["est_value"], "source": "field", "notes": None,
+            "activities": [], "customer_id": None, "created_by": "mgr-1",
+            "created_at": iso(base - timedelta(days=20 - i)), "updated_at": iso(base - timedelta(days=20 - i)),
+        })
+    logger.info("Seeded team demo: owner + 5 staff + 6 leads + delivery assignments")
+
+
+# ---------- Staff management (owner / manager) ----------
+class StaffCreateReq(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+    role: str  # manager | field_sales | delivery
+    phone: Optional[str] = None
+
+
+class StaffUpdateReq(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    role: Optional[str] = None
+    active: Optional[bool] = None
+    new_password: Optional[str] = None
+
+
+def _staff_public(u: dict) -> dict:
+    return {
+        "id": u["id"], "name": u.get("name"), "email": u.get("email"), "phone": u.get("phone"),
+        "role": u.get("role"), "active": u.get("active", True), "created_at": u.get("created_at"),
+    }
+
+
+@api_router.get("/distributor/me/staff")
+async def list_staff(role: Optional[str] = None, user: dict = Depends(get_current_user)):
+    d = await staff_distributor(user, {"owner", "manager"})
+    q = {"distributor_id": d["id"], "role": {"$in": list(STAFF_PASSWORD_ROLES)}}
+    if role:
+        q["role"] = role
+    rows = await db.users.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return [_staff_public(u) for u in rows]
+
+
+@api_router.post("/distributor/me/staff")
+async def create_staff(req: StaffCreateReq, user: dict = Depends(get_current_user)):
+    d = await staff_distributor(user, {"owner", "manager"})
+    if req.role not in STAFF_PASSWORD_ROLES:
+        raise HTTPException(400, "Role must be manager, field_sales or delivery")
+    if len(req.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+    email = req.email.lower().strip()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(409, "An account with this email already exists")
+    uid = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": uid, "email": email, "name": req.name.strip(), "phone": (req.phone or "").strip() or None,
+        "role": req.role, "password_hash": hash_password(req.password), "distributor_id": d["id"],
+        "owned_distributor_id": None, "onboarded": True, "active": True, "must_change_password": True,
+        "created_by": user["id"], "created_at": iso(now_utc()),
+    })
+    u = await db.users.find_one({"id": uid}, {"_id": 0})
+    return {"success": True, "staff": _staff_public(u)}
+
+
+@api_router.patch("/distributor/me/staff/{staff_id}")
+async def update_staff(staff_id: str, req: StaffUpdateReq, user: dict = Depends(get_current_user)):
+    d = await staff_distributor(user, {"owner", "manager"})
+    s = await db.users.find_one({"id": staff_id, "distributor_id": d["id"]}, {"_id": 0})
+    if not s or s.get("role") not in STAFF_PASSWORD_ROLES:
+        raise HTTPException(404, "Staff member not found")
+    upd: dict = {}
+    if req.name is not None: upd["name"] = req.name.strip()
+    if req.phone is not None: upd["phone"] = req.phone.strip() or None
+    if req.role is not None:
+        if req.role not in STAFF_PASSWORD_ROLES:
+            raise HTTPException(400, "Invalid role")
+        upd["role"] = req.role
+    if req.active is not None: upd["active"] = req.active
+    if req.new_password:
+        if len(req.new_password) < 6:
+            raise HTTPException(400, "Password must be at least 6 characters")
+        upd["password_hash"] = hash_password(req.new_password)
+        upd["must_change_password"] = True
+    await db.users.update_one({"id": staff_id}, {"$set": upd})
+    u = await db.users.find_one({"id": staff_id}, {"_id": 0})
+    return {"success": True, "staff": _staff_public(u)}
+
+
+@api_router.delete("/distributor/me/staff/{staff_id}")
+async def deactivate_staff(staff_id: str, user: dict = Depends(get_current_user)):
+    d = await staff_distributor(user, {"owner", "manager"})
+    s = await db.users.find_one({"id": staff_id, "distributor_id": d["id"]}, {"_id": 0})
+    if not s:
+        raise HTTPException(404, "Staff member not found")
+    await db.users.update_one({"id": staff_id}, {"$set": {"active": False}})
+    return {"success": True}
+
+
+# ---------- Delivery operations ----------
+class AssignReq(BaseModel):
+    delivery_user_id: str
+
+
+class DeliverReq(BaseModel):
+    photo_base64: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    notes: Optional[str] = None
+    amount_collected: Optional[float] = None
+
+
+class FailReq(BaseModel):
+    reason: str
+
+
+@api_router.patch("/distributor/orders/{order_id}/assign")
+async def assign_delivery(order_id: str, req: AssignReq, user: dict = Depends(get_current_user)):
+    d = await staff_distributor(user, {"owner", "manager"})
+    o = await db.orders.find_one({"id": order_id, "distributor_id": d["id"]}, {"_id": 0})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    rider = await db.users.find_one({"id": req.delivery_user_id, "distributor_id": d["id"], "role": "delivery"}, {"_id": 0})
+    if not rider:
+        raise HTTPException(404, "Delivery person not found")
+    await db.orders.update_one({"id": order_id}, {"$set": {
+        "assigned_to": rider["id"], "assigned_to_name": rider.get("name"), "delivery_status": "assigned",
+    }})
+    return {"success": True}
+
+
+@api_router.get("/delivery/me/orders")
+async def delivery_my_orders(status: Optional[str] = None, user: dict = Depends(get_current_user)):
+    require_role(user, {"delivery"})
+    q: dict = {"assigned_to": user["id"]}
+    if status == "completed":
+        q["delivery_status"] = {"$in": ["delivered", "failed"]}
+    else:
+        q["delivery_status"] = {"$in": ["assigned", "out_for_delivery"]}
+    orders = await db.orders.find(q, {"_id": 0}).sort("created_at", 1).to_list(200)
+    uids = list({o["user_id"] for o in orders})
+    users = {u["id"]: u for u in await db.users.find({"id": {"$in": uids}}, {"_id": 0}).to_list(500)}
+    for o in orders:
+        u = users.get(o["user_id"]) or {}
+        o["customer_name"] = u.get("shop_name") or u.get("name") or "Customer"
+        o["customer_phone"] = u.get("phone")
+        o["customer_address"] = u.get("address")
+    return orders
+
+
+@api_router.get("/delivery/me/summary")
+async def delivery_summary(user: dict = Depends(get_current_user)):
+    require_role(user, {"delivery"})
+    today = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
+    assigned = await db.orders.count_documents({"assigned_to": user["id"], "delivery_status": {"$in": ["assigned", "out_for_delivery"]}})
+    delivered_today = await db.orders.count_documents({"assigned_to": user["id"], "delivery_status": "delivered", "delivered_at": {"$gte": iso(today)}})
+    failed = await db.orders.count_documents({"assigned_to": user["id"], "delivery_status": "failed"})
+    return {"pending": assigned, "delivered_today": delivered_today, "failed": failed, "rider_name": user.get("name")}
+
+
+@api_router.post("/delivery/orders/{order_id}/start")
+async def delivery_start(order_id: str, user: dict = Depends(get_current_user)):
+    require_role(user, {"delivery"})
+    o = await db.orders.find_one({"id": order_id, "assigned_to": user["id"]}, {"_id": 0})
+    if not o:
+        raise HTTPException(404, "Delivery not found")
+    await db.orders.update_one({"id": order_id}, {"$set": {"delivery_status": "out_for_delivery"}})
+    return {"success": True}
+
+
+@api_router.post("/delivery/orders/{order_id}/deliver")
+async def delivery_complete(order_id: str, req: DeliverReq, user: dict = Depends(get_current_user)):
+    require_role(user, {"delivery"})
+    o = await db.orders.find_one({"id": order_id, "assigned_to": user["id"]}, {"_id": 0})
+    if not o:
+        raise HTTPException(404, "Delivery not found")
+    if not req.photo_base64:
+        raise HTTPException(400, "A delivery photo is required as proof")
+    proof = {
+        "photo_base64": req.photo_base64, "lat": req.lat, "lng": req.lng,
+        "notes": req.notes, "captured_at": iso(now_utc()), "rider_id": user["id"], "rider_name": user.get("name"),
+        "amount_collected": req.amount_collected,
+    }
+    await db.orders.update_one({"id": order_id}, {"$set": {
+        "status": "delivered", "delivery_status": "delivered", "delivery_confirmed": True,
+        "delivered_at": iso(now_utc()), "delivery_proof": proof,
+    }})
+    return {"success": True}
+
+
+@api_router.post("/delivery/orders/{order_id}/fail")
+async def delivery_fail(order_id: str, req: FailReq, user: dict = Depends(get_current_user)):
+    require_role(user, {"delivery"})
+    o = await db.orders.find_one({"id": order_id, "assigned_to": user["id"]}, {"_id": 0})
+    if not o:
+        raise HTTPException(404, "Delivery not found")
+    await db.orders.update_one({"id": order_id}, {"$set": {
+        "delivery_status": "failed", "fail_reason": req.reason, "failed_at": iso(now_utc()),
+    }})
+    return {"success": True}
+
+
+# ---------- Field Sales CRM ----------
+class LeadCreateReq(BaseModel):
+    shop_name: str
+    contact_name: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    area: Optional[str] = None
+    assigned_to: Optional[str] = None
+    est_value: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class LeadBulkReq(BaseModel):
+    leads: List[LeadCreateReq]
+    assigned_to: Optional[str] = None
+
+
+class LeadUpdateReq(BaseModel):
+    status: Optional[str] = None
+    assigned_to: Optional[str] = None
+    est_value: Optional[float] = None
+    notes: Optional[str] = None
+    contact_name: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+
+
+class LeadActivityReq(BaseModel):
+    type: str  # call | visit | note
+    notes: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+
+LEAD_STAGES = ["new", "contacted", "visited", "converted", "lost"]
+
+
+async def _distributor_for_crm(user: dict) -> dict:
+    return await staff_distributor(user, {"owner", "manager", "field_sales"})
+
+
+@api_router.get("/distributor/me/leads")
+async def list_leads(status: Optional[str] = None, q: Optional[str] = None, mine: Optional[bool] = None, user: dict = Depends(get_current_user)):
+    d = await _distributor_for_crm(user)
+    query: dict = {"distributor_id": d["id"]}
+    # field reps only see their own leads
+    if user.get("role") == "field_sales" or mine:
+        query["assigned_to"] = user["id"]
+    if status:
+        query["status"] = status
+    rows = await db.leads.find(query, {"_id": 0}).sort("updated_at", -1).to_list(1000)
+    if q:
+        ql = q.lower()
+        rows = [r for r in rows if ql in (r.get("shop_name", "").lower()) or ql in (r.get("area", "").lower()) or ql in (r.get("phone", "") or "")]
+    counts = {s: 0 for s in LEAD_STAGES}
+    base_q = {"distributor_id": d["id"]}
+    if user.get("role") == "field_sales":
+        base_q["assigned_to"] = user["id"]
+    for r in await db.leads.find(base_q, {"_id": 0, "status": 1}).to_list(2000):
+        counts[r.get("status", "new")] = counts.get(r.get("status", "new"), 0) + 1
+    return {"items": rows, "counts": counts}
+
+
+@api_router.post("/distributor/me/leads")
+async def create_lead(req: LeadCreateReq, user: dict = Depends(get_current_user)):
+    d = await _distributor_for_crm(user)
+    assignee = req.assigned_to or (user["id"] if user.get("role") == "field_sales" else None)
+    aname = None
+    if assignee:
+        au = await db.users.find_one({"id": assignee}, {"_id": 0})
+        aname = (au or {}).get("name")
+    lead = {
+        "id": str(uuid.uuid4()), "distributor_id": d["id"], "shop_name": req.shop_name.strip(),
+        "contact_name": req.contact_name, "phone": req.phone, "address": req.address,
+        "area": req.area, "status": "new", "assigned_to": assignee, "assigned_to_name": aname,
+        "est_value": req.est_value or 0, "source": "field", "notes": req.notes, "activities": [],
+        "customer_id": None, "created_by": user["id"], "created_at": iso(now_utc()), "updated_at": iso(now_utc()),
+    }
+    await db.leads.insert_one({**lead})
+    return {"success": True, "lead": lead}
+
+
+@api_router.post("/distributor/me/leads/bulk")
+async def bulk_leads(req: LeadBulkReq, user: dict = Depends(get_current_user)):
+    d = await staff_distributor(user, {"owner", "manager"})
+    aname = None
+    if req.assigned_to:
+        au = await db.users.find_one({"id": req.assigned_to}, {"_id": 0})
+        aname = (au or {}).get("name")
+    docs = []
+    for l in req.leads:
+        if not l.shop_name.strip():
+            continue
+        docs.append({
+            "id": str(uuid.uuid4()), "distributor_id": d["id"], "shop_name": l.shop_name.strip(),
+            "contact_name": l.contact_name, "phone": l.phone, "address": l.address, "area": l.area,
+            "status": "new", "assigned_to": req.assigned_to, "assigned_to_name": aname,
+            "est_value": l.est_value or 0, "source": "import", "notes": l.notes, "activities": [],
+            "customer_id": None, "created_by": user["id"], "created_at": iso(now_utc()), "updated_at": iso(now_utc()),
+        })
+    if docs:
+        await db.leads.insert_many(docs)
+    return {"success": True, "imported": len(docs)}
+
+
+@api_router.get("/distributor/me/leads/{lead_id}")
+async def lead_detail(lead_id: str, user: dict = Depends(get_current_user)):
+    d = await _distributor_for_crm(user)
+    lead = await db.leads.find_one({"id": lead_id, "distributor_id": d["id"]}, {"_id": 0})
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    if user.get("role") == "field_sales" and lead.get("assigned_to") != user["id"]:
+        raise HTTPException(403, "Not your lead")
+    return lead
+
+
+@api_router.patch("/distributor/me/leads/{lead_id}")
+async def update_lead(lead_id: str, req: LeadUpdateReq, user: dict = Depends(get_current_user)):
+    d = await _distributor_for_crm(user)
+    lead = await db.leads.find_one({"id": lead_id, "distributor_id": d["id"]}, {"_id": 0})
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    if user.get("role") == "field_sales" and lead.get("assigned_to") != user["id"]:
+        raise HTTPException(403, "Not your lead")
+    upd: dict = {"updated_at": iso(now_utc())}
+    if req.status is not None:
+        if req.status not in LEAD_STAGES:
+            raise HTTPException(400, "Invalid status")
+        upd["status"] = req.status
+    if req.assigned_to is not None:
+        au = await db.users.find_one({"id": req.assigned_to}, {"_id": 0})
+        upd["assigned_to"] = req.assigned_to
+        upd["assigned_to_name"] = (au or {}).get("name")
+    for f in ["est_value", "notes", "contact_name", "phone", "address"]:
+        v = getattr(req, f)
+        if v is not None:
+            upd[f] = v
+    await db.leads.update_one({"id": lead_id}, {"$set": upd})
+    return {"success": True, "lead": await db.leads.find_one({"id": lead_id}, {"_id": 0})}
+
+
+@api_router.post("/distributor/me/leads/{lead_id}/activity")
+async def add_lead_activity(lead_id: str, req: LeadActivityReq, user: dict = Depends(get_current_user)):
+    d = await _distributor_for_crm(user)
+    lead = await db.leads.find_one({"id": lead_id, "distributor_id": d["id"]}, {"_id": 0})
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    act = {
+        "id": str(uuid.uuid4()), "type": req.type, "notes": req.notes, "lat": req.lat, "lng": req.lng,
+        "by": user["id"], "by_name": user.get("name"), "at": iso(now_utc()),
+    }
+    new_status = lead.get("status")
+    if req.type == "visit" and lead.get("status") in ("new", "contacted"):
+        new_status = "visited"
+    elif req.type == "call" and lead.get("status") == "new":
+        new_status = "contacted"
+    await db.leads.update_one({"id": lead_id}, {"$push": {"activities": act}, "$set": {"status": new_status, "updated_at": iso(now_utc())}})
+    return {"success": True, "activity": act}
+
+
+@api_router.post("/distributor/me/leads/{lead_id}/convert")
+async def convert_lead(lead_id: str, user: dict = Depends(get_current_user)):
+    d = await _distributor_for_crm(user)
+    lead = await db.leads.find_one({"id": lead_id, "distributor_id": d["id"]}, {"_id": 0})
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    if lead.get("customer_id"):
+        raise HTTPException(400, "Lead already converted")
+    cust_id = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": cust_id, "email": (lead.get("phone") or cust_id) + "@lead.demo",
+        "name": lead.get("contact_name") or lead["shop_name"], "phone": lead.get("phone"),
+        "shop_name": lead["shop_name"], "gst": None, "address": lead.get("address"),
+        "drug_license": None, "food_license": None, "onboarded": True, "role": "pharmacist",
+        "owned_distributor_id": None, "created_at": iso(now_utc()),
+    })
+    await cc_get(d["id"], cust_id)  # opens a default credit line
+    await db.leads.update_one({"id": lead_id}, {"$set": {"status": "converted", "customer_id": cust_id, "updated_at": iso(now_utc())}})
+    return {"success": True, "customer_id": cust_id}
+
+
+@api_router.delete("/distributor/me/leads/{lead_id}")
+async def delete_lead(lead_id: str, user: dict = Depends(get_current_user)):
+    d = await staff_distributor(user, {"owner", "manager"})
+    res = await db.leads.delete_one({"id": lead_id, "distributor_id": d["id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Lead not found")
+    return {"success": True}
+
+
+# ---------- Owner cockpit: team performance ----------
+@api_router.get("/distributor/me/team/performance")
+async def team_performance(user: dict = Depends(get_current_user)):
+    d = await staff_distributor(user, {"owner", "manager"})
+    staff = await db.users.find({"distributor_id": d["id"], "role": {"$in": list(STAFF_PASSWORD_ROLES)}}, {"_id": 0}).to_list(200)
+    today = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
+    perf = []
+    for s in staff:
+        if s["role"] == "delivery":
+            delivered = await db.orders.count_documents({"assigned_to": s["id"], "delivery_status": "delivered"})
+            delivered_today = await db.orders.count_documents({"assigned_to": s["id"], "delivery_status": "delivered", "delivered_at": {"$gte": iso(today)}})
+            pending = await db.orders.count_documents({"assigned_to": s["id"], "delivery_status": {"$in": ["assigned", "out_for_delivery"]}})
+            perf.append({**_staff_public(s), "metric_label": "Deliveries", "delivered": delivered, "delivered_today": delivered_today, "pending": pending})
+        elif s["role"] == "field_sales":
+            total = await db.leads.count_documents({"assigned_to": s["id"]})
+            converted = await db.leads.count_documents({"assigned_to": s["id"], "status": "converted"})
+            perf.append({**_staff_public(s), "metric_label": "Leads", "leads": total, "converted": converted,
+                         "conversion_pct": round((converted / max(total, 1)) * 100)})
+        else:
+            perf.append({**_staff_public(s), "metric_label": "Manager"})
+    summary = {
+        "total_staff": len(staff),
+        "managers": len([s for s in staff if s["role"] == "manager"]),
+        "field_sales": len([s for s in staff if s["role"] == "field_sales"]),
+        "delivery": len([s for s in staff if s["role"] == "delivery"]),
+    }
+    return {"summary": summary, "team": perf}
+
+
 # Register router
 app.include_router(api_router)
 
@@ -3489,6 +4058,7 @@ app.add_middleware(
 async def startup():
     await seed_database()
     await seed_distributor_demo()
+    await seed_team_demo()
 
 
 @app.on_event("shutdown")

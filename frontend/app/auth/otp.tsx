@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Button } from "@/src/components/Button";
 import { api, setToken } from "@/src/api";
 import { showError, showSuccess, showInfo } from "@/src/components/Toast";
+import { routeByRole } from "@/src/utils/routeByRole";
 import { colors } from "@/src/theme";
 
 export default function OtpScreen() {
@@ -77,8 +78,7 @@ export default function OtpScreen() {
         auth: false,
       });
       await setToken(res.token);
-      if (res.onboarded) router.replace("/(tabs)/home");
-      else router.replace("/auth/onboarding");
+      routeByRole(router, { ...(res.user || {}), onboarded: res.onboarded, role: res.user?.role });
     } catch (e: any) {
       setHasError(true);
       const msg = e?.message || "Please check the code";

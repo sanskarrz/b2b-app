@@ -3,6 +3,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { api } from "@/src/api";
 import { storage } from "@/src/utils/storage";
+import { routeByRole } from "@/src/utils/routeByRole";
 import { colors } from "@/src/theme";
 
 export default function Index() {
@@ -17,11 +18,7 @@ export default function Index() {
       }
       try {
         const me = await api("/auth/me");
-        if (!me.onboarded) {
-          router.replace("/auth/onboarding");
-        } else {
-          router.replace("/(tabs)/home");
-        }
+        routeByRole(router, me);
       } catch (e) {
         await storage.secureRemove("rxtech_token");
         router.replace("/auth/email");
