@@ -49,6 +49,9 @@ export default function DLayout() {
       <Tabs.Screen name="customer/[id]" options={{ href: null }} />
       <Tabs.Screen name="messages/index" options={{ href: null }} />
       <Tabs.Screen name="messages/[id]" options={{ href: null }} />
+      <Tabs.Screen name="team" options={{ href: null }} />
+      <Tabs.Screen name="leads" options={{ href: null }} />
+      <Tabs.Screen name="deliveries" options={{ href: null }} />
     </Tabs>
   );
 }

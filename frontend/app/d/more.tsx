@@ -13,6 +13,7 @@ const BACKEND = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
 
 export default function DistributorMore() {
   const router = useRouter();
+  const [me, setMe] = useState<any>(null);
   const [keys, setKeys] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -21,13 +22,19 @@ export default function DistributorMore() {
   const [showCreate, setShowCreate] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
 
+  const isOwner = me?.role === "owner";
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api("/distributor/me/api-keys");
-      setKeys(data);
+      const profile = await api("/auth/me");
+      setMe(profile);
+      if (profile?.role === "owner") {
+        const data = await api("/distributor/me/api-keys");
+        setKeys(data);
+      }
     } catch (e: any) {
-      showError(e?.message || "Could not load API keys", "Load failed");
+      showError(e?.message || "Could not load profile", "Load failed");
     } finally {
       setLoading(false);
     }
@@ -69,23 +76,6 @@ export default function DistributorMore() {
     ]);
   };
 
-  const switchToPharmacist = () => {
-    confirm("Switch to Pharmacist mode?", "You can come back to distributor mode anytime from More.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Switch",
-        onPress: async () => {
-          try {
-            await api("/distributor/switch-role", { method: "POST", body: { role: "pharmacist" } });
-            router.replace("/(tabs)/home");
-          } catch (e: any) {
-            showError(e?.message || "Could not switch", "Failed");
-          }
-        },
-      },
-    ]);
-  };
-
   const signOut = async () => {
     await clearToken();
     router.replace("/auth/email");
@@ -98,17 +88,28 @@ export default function DistributorMore() {
           <Text style={styles.title}>More</Text>
         </View>
 
-        {/* Switcher banner */}
-        <TouchableOpacity style={styles.banner} onPress={switchToPharmacist} testID="switch-pharmacist">
-          <View style={styles.bannerIcon}><Ionicons name="swap-horizontal" size={18} color={colors.primary} /></View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.bannerTitle}>Switch to Pharmacist mode</Text>
-            <Text style={styles.bannerSub}>You&apos;re in Distributor mode. Tap to go back.</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-        </TouchableOpacity>
+        {/* Team & Operations */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Team & Operations</Text>
+          <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/team")} testID="nav-team">
+            <Ionicons name="people-outline" size={20} color={colors.text} />
+            <Text style={styles.itemText}>My Team</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/leads")} testID="nav-leads">
+            <Ionicons name="funnel-outline" size={20} color={colors.text} />
+            <Text style={styles.itemText}>Sales CRM</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/deliveries")} testID="nav-deliveries">
+            <Ionicons name="bicycle-outline" size={20} color={colors.text} />
+            <Text style={styles.itemText}>Deliveries</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
+        </View>
 
-        {/* ERP Integration */}
+        {/* ERP Integration — owner only */}
+        {isOwner && (
         <View style={styles.section}>
           <View style={styles.sectionHead}>
             <Text style={styles.sectionTitle}>ERP Integration</Text>
@@ -183,6 +184,7 @@ export default function DistributorMore() {
             ))
           )}
         </View>
+        )}
 
         {/* Profile/Sign out */}
         <View style={styles.section}>

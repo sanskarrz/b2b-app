@@ -2707,14 +2707,37 @@ async def seed_distributor_demo() -> None:
 
 
 async def get_owned_distributor(user: dict) -> dict:
-    """Return the Distributor record owned by this user, or 403."""
+    """Return the Distributor record this user can manage.
+
+    Owners reach it via owned_distributor_id. Managers (staff role) reach the
+    same distributor via their distributor_id — they share the owner's
+    operational dashboard, customers, collections, leads and deliveries.
+    """
     did = user.get("owned_distributor_id")
+    if not did and user.get("role") == "manager":
+        did = user.get("distributor_id")
     if not did:
-        # Try fallback by email match (demo@rxtech.com → dist-1)
-        u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
-        did = (u or {}).get("owned_distributor_id")
+        # Try fallback from DB (demo@rxtech.com → dist-1 / managers)
+        u = await db.users.find_one({"id": user["id"]}, {"_id": 0}) or {}
+        did = u.get("owned_distributor_id")
+        if not did and u.get("role") == "manager":
+            did = u.get("distributor_id")
     if not did:
         raise HTTPException(403, "You do not own a distributor account")
+    d = await db.distributors.find_one({"id": did}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Distributor not found")
+    return d
+
+
+async def require_owner_distributor(user: dict) -> dict:
+    """Owner-only access (billing / ERP integration / owner settings)."""
+    did = user.get("owned_distributor_id")
+    if not did:
+        u = await db.users.find_one({"id": user["id"]}, {"_id": 0}) or {}
+        did = u.get("owned_distributor_id")
+    if not did:
+        raise HTTPException(403, "Only the account owner can manage this")
     d = await db.distributors.find_one({"id": did}, {"_id": 0})
     if not d:
         raise HTTPException(404, "Distributor not found")
@@ -3051,14 +3074,14 @@ async def distributor_customers(
 
 @api_router.get("/distributor/me/api-keys")
 async def list_api_keys(user: dict = Depends(get_current_user)):
-    d = await get_owned_distributor(user)
+    d = await require_owner_distributor(user)
     keys = await db.api_keys.find({"distributor_id": d["id"]}, {"_id": 0, "key_secret": 0}).to_list(50)
     return keys
 
 
 @api_router.post("/distributor/me/api-keys")
 async def create_api_key(payload: dict = Body(default={}), user: dict = Depends(get_current_user)):
-    d = await get_owned_distributor(user)
+    d = await require_owner_distributor(user)
     label = (payload.get("label") or "ERP Integration").strip()
     raw = "rxt_live_" + _secrets.token_urlsafe(32)
     item = {
@@ -3078,7 +3101,7 @@ async def create_api_key(payload: dict = Body(default={}), user: dict = Depends(
 
 @api_router.delete("/distributor/me/api-keys/{key_id}")
 async def revoke_api_key(key_id: str, user: dict = Depends(get_current_user)):
-    d = await get_owned_distributor(user)
+    d = await require_owner_distributor(user)
     r = await db.api_keys.update_one({"id": key_id, "distributor_id": d["id"]}, {"$set": {"active": False}})
     if r.modified_count == 0:
         raise HTTPException(404, "Key not found")
