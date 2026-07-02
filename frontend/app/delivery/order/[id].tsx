@@ -22,6 +22,9 @@ export default function DeliveryDetail() {
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [failOpen, setFailOpen] = useState(false);
+  const [cashOtp, setCashOtp] = useState<string | null>(null);
+  const [enteredOtp, setEnteredOtp] = useState("");
+  const [otpBusy, setOtpBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -88,14 +91,27 @@ export default function DeliveryDetail() {
     }
   };
 
+  const genCashOtp = async () => {
+    setOtpBusy(true);
+    try {
+      const r = await api(`/delivery/orders/${id}/cash-otp`, { method: "POST" });
+      setCashOtp(r.otp);
+      showSuccess("OTP sent to customer");
+    } catch (e: any) { showError(e?.message || "Could not generate OTP"); }
+    finally { setOtpBusy(false); }
+  };
+
   const markDelivered = async () => {
     if (!photo) { showError("Please capture a delivery photo as proof"); return; }
+    if (order?.payment_method === "cash" && cashOtp && !enteredOtp.trim()) {
+      showError("Enter the cash collection OTP the customer received"); return;
+    }
     setBusy(true);
     try {
       const loc = await getLocation();
       await api(`/delivery/orders/${id}/deliver`, {
         method: "POST",
-        body: { photo_base64: photo, lat: loc.lat, lng: loc.lng, notes: notes || null },
+        body: { photo_base64: photo, lat: loc.lat, lng: loc.lng, notes: notes || null, cash_otp: enteredOtp.trim() || null },
       });
       showSuccess("Delivery completed ✓");
       router.back();
@@ -203,6 +219,23 @@ export default function DeliveryDetail() {
                 <Text style={styles.retakeText}>Retake</Text>
               </TouchableOpacity>
             )}
+
+            {order.payment_method === "cash" && (
+              <View style={styles.otpBox}>
+                <Text style={styles.otpTitle}>Cash collection OTP</Text>
+                {!cashOtp ? (
+                  <TouchableOpacity style={[styles.otpGenBtn, otpBusy && { opacity: 0.5 }]} onPress={genCashOtp} disabled={otpBusy} testID="gen-cash-otp">
+                    {otpBusy ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.otpGenText}>Send OTP to customer ({formatINRFull(order.total)})</Text>}
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <View style={styles.otpDemo}><Text style={styles.otpDemoText}>Customer&apos;s OTP (demo): <Text style={{ fontWeight: "800" }}>{cashOtp}</Text></Text></View>
+                    <TextInput value={enteredOtp} onChangeText={setEnteredOtp} placeholder="Enter OTP from customer" placeholderTextColor={colors.textTertiary} keyboardType="number-pad" maxLength={6} style={styles.otpInput} testID="cash-otp-input" />
+                  </>
+                )}
+              </View>
+            )}
+
             <TextInput
               value={notes}
               onChangeText={setNotes}
@@ -284,6 +317,13 @@ const styles = StyleSheet.create({
   photoPreview: { width: "100%", height: "100%" },
   retake: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 8 },
   retakeText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
+  otpBox: { backgroundColor: colors.warningBg || "#FFF7ED", borderWidth: 1, borderColor: colors.warning, borderRadius: 12, padding: 14, marginTop: 12 },
+  otpTitle: { fontWeight: "800", color: colors.text, fontSize: 13.5, marginBottom: 8 },
+  otpGenBtn: { backgroundColor: colors.primaryBg, borderWidth: 1, borderColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center" },
+  otpGenText: { color: colors.primary, fontWeight: "800", fontSize: 13 },
+  otpDemo: { backgroundColor: "#FFF", borderRadius: 8, padding: 10, marginBottom: 8 },
+  otpDemoText: { color: colors.textSecondary, fontSize: 12.5 },
+  otpInput: { backgroundColor: "#FFF", borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, fontSize: 18, letterSpacing: 4, textAlign: "center", color: colors.text, fontWeight: "800" },
   notes: { backgroundColor: "#FFF", borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginTop: 12, minHeight: 50, color: colors.text, fontSize: 14 },
   deliverBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.success, paddingVertical: 15, borderRadius: 12, marginTop: 14 },
   deliverText: { color: "#FFF", fontWeight: "800", fontSize: 15 },

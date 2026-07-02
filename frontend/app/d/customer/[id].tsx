@@ -98,6 +98,17 @@ export default function DistributorCustomerDetail() {
     finally { setSaving(false); }
   };
 
+  const toggleBlacklist = async () => {
+    const next = !data?.credit?.blacklisted;
+    setSaving(true);
+    try {
+      await api(`/distributor/me/customers/${id}/blacklist`, { method: "PATCH", body: { blacklisted: next, reason: next ? "Blocked by distributor" : null } });
+      showSuccess(next ? "Customer blacklisted — ordering blocked" : "Customer removed from blacklist");
+      await load();
+    } catch (e: any) { showError(e?.message || "Failed"); }
+    finally { setSaving(false); }
+  };
+
   if (loading || !data) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
@@ -155,6 +166,14 @@ export default function DistributorCustomerDetail() {
               <Text style={styles.statementBtnText}>Share Account Statement</Text>
             </>
           )}
+        </TouchableOpacity>
+
+        {/* Blacklist toggle */}
+        <TouchableOpacity style={[styles.blacklistBtn, cr.blacklisted && styles.blacklistActive]} onPress={toggleBlacklist} disabled={saving} testID="blacklist-toggle">
+          <Ionicons name={cr.blacklisted ? "lock-open" : "ban"} size={16} color={cr.blacklisted ? colors.success : colors.danger} />
+          <Text style={[styles.blacklistText, { color: cr.blacklisted ? colors.success : colors.danger }]}>
+            {cr.blacklisted ? "Blacklisted — Tap to unblock" : "Blacklist this customer"}
+          </Text>
         </TouchableOpacity>
 
         {/* Business stats */}
@@ -346,6 +365,9 @@ const styles = StyleSheet.create({
 
   statementBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 12, marginTop: 12, paddingVertical: 13, borderRadius: radius.md, backgroundColor: "#25D366" },
   statementBtnText: { color: "#FFF", fontWeight: "800", fontSize: 14 },
+  blacklistBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 12, marginTop: 10, paddingVertical: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.danger, backgroundColor: colors.dangerBg },
+  blacklistActive: { borderColor: colors.success, backgroundColor: colors.successBg },
+  blacklistText: { fontWeight: "800", fontSize: 13.5 },
 
   statsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 12, marginTop: 12 },
   statCard: { flexGrow: 1, flexBasis: "47%", backgroundColor: "#FFF", padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },

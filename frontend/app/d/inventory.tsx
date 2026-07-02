@@ -23,7 +23,11 @@ export default function DistributorInventory() {
   const [only, setOnly] = useState<string>(params.only || "");
   const [editing, setEditing] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ ptr: "", mrp: "", qty_available: "", scheme: "", expiry: "" });
+  const [form, setForm] = useState({ ptr: "", mrp: "", qty_available: "", scheme: "", expiry: "", barcode: "" });
+  const [adjQty, setAdjQty] = useState("");
+  const [adjReason, setAdjReason] = useState("damage");
+  const [adjBusy, setAdjBusy] = useState(false);
+  const [barcodeBusy, setBarcodeBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -44,13 +48,49 @@ export default function DistributorInventory() {
 
   const openEdit = (it: any) => {
     setEditing(it);
+    setAdjQty(""); setAdjReason("damage");
     setForm({
       ptr: String(it.ptr || ""),
       mrp: String(it.mrp || ""),
       qty_available: String(it.qty_available || 0),
       scheme: it.scheme || "",
       expiry: it.expiry || "",
+      barcode: it.barcode || "",
     });
+  };
+
+  const autoBarcode = async () => {
+    setBarcodeBusy(true);
+    try {
+      const r = await api("/distributor/me/inventory/auto-barcode", { method: "POST" });
+      showSuccess(r.assigned > 0 ? `Assigned ${r.assigned} barcodes` : "All products already have barcodes");
+      await load();
+    } catch (e: any) { showError(e?.message || "Failed"); }
+    finally { setBarcodeBusy(false); }
+  };
+
+  const saveBarcode = async () => {
+    if (!editing || !form.barcode.trim()) return;
+    try {
+      await api(`/distributor/me/inventory/${editing.product_id}/barcode`, { method: "POST", body: { barcode: form.barcode.trim() } });
+      showSuccess("Barcode saved");
+      await load();
+    } catch (e: any) { showError(e?.message || "Failed"); }
+  };
+
+  const adjustStock = async () => {
+    if (!editing) return;
+    const n = parseInt(adjQty, 10);
+    if (!n || n <= 0) { showError("Enter quantity to remove"); return; }
+    setAdjBusy(true);
+    try {
+      const r = await api(`/distributor/me/inventory/${editing.product_id}/adjust`, { method: "POST", body: { delta: -n, reason: adjReason } });
+      showSuccess(`Removed ${n} (${adjReason}). New stock: ${r.qty_available}`);
+      setForm((f) => ({ ...f, qty_available: String(r.qty_available) }));
+      setAdjQty("");
+      await load();
+    } catch (e: any) { showError(e?.message || "Failed"); }
+    finally { setAdjBusy(false); }
   };
 
   const save = async () => {
@@ -80,8 +120,13 @@ export default function DistributorInventory() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Inventory</Text>
-        <Text style={styles.sub}>{items.length} SKUs</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Inventory</Text>
+          <Text style={styles.sub}>{items.length} SKUs</Text>
+        </View>
+        <TouchableOpacity style={[styles.barcodeBtn, barcodeBusy && { opacity: 0.5 }]} onPress={autoBarcode} disabled={barcodeBusy} testID="auto-barcode-btn">
+          {barcodeBusy ? <ActivityIndicator color={colors.primary} size="small" /> : <><Ionicons name="barcode-outline" size={16} color={colors.primary} /><Text style={styles.barcodeBtnText}>Auto barcodes</Text></>}
+        </TouchableOpacity>
       </View>
 
       <View style={styles.searchWrap}>
@@ -150,6 +195,30 @@ export default function DistributorInventory() {
               <Field label="Expiry (e.g., Jun 27)" value={form.expiry} onChange={(v) => setForm({ ...form, expiry: v })} />
             </View>
             <Field label="Scheme (e.g., 10+1 Free)" value={form.scheme} onChange={(v) => setForm({ ...form, scheme: v })} />
+
+            <Text style={[styles.fieldLabel, { marginTop: 8 }]}>Barcode</Text>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <TextInput value={form.barcode} onChangeText={(v) => setForm({ ...form, barcode: v.replace(/\s/g, "") })} placeholder="Scan or type barcode" placeholderTextColor={colors.textTertiary} style={[styles.input, { flex: 1 }]} testID="barcode-input" />
+              <TouchableOpacity style={styles.barcodeSave} onPress={saveBarcode} testID="save-barcode"><Text style={styles.barcodeSaveText}>Save</Text></TouchableOpacity>
+            </View>
+
+            <View style={styles.adjBox}>
+              <Text style={styles.adjTitle}>Adjust stock — damage / expiry</Text>
+              <View style={styles.adjReasons}>
+                {["damage", "expiry", "correction"].map((r) => (
+                  <TouchableOpacity key={r} style={[styles.adjChip, adjReason === r && styles.adjChipActive]} onPress={() => setAdjReason(r)}>
+                    <Text style={[styles.adjChipText, adjReason === r && { color: "#FFF" }]}>{r}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                <TextInput value={adjQty} onChangeText={(v) => setAdjQty(v.replace(/\D/g, ""))} keyboardType="number-pad" placeholder="Qty to remove" placeholderTextColor={colors.textTertiary} style={[styles.input, { flex: 1 }]} testID="adjust-qty" />
+                <TouchableOpacity style={[styles.adjBtn, adjBusy && { opacity: 0.5 }]} onPress={adjustStock} disabled={adjBusy} testID="apply-adjust">
+                  {adjBusy ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.adjBtnText}>Remove</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+
             <View style={{ flexDirection: "row", gap: 8, marginTop: 18 }}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(null)}>
                 <Text style={styles.cancelText}>Cancel</Text>
@@ -176,7 +245,19 @@ function Field({ label, value, onChange, keyboardType }: { label: string; value:
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  header: { padding: 16, paddingBottom: 6 },
+  header: { padding: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center" },
+  barcodeBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: colors.primaryBg, borderWidth: 1, borderColor: colors.primarySoft },
+  barcodeBtnText: { color: colors.primary, fontWeight: "800", fontSize: 12 },
+  barcodeSave: { paddingHorizontal: 16, justifyContent: "center", borderRadius: 10, backgroundColor: colors.primary },
+  barcodeSaveText: { color: "#FFF", fontWeight: "800", fontSize: 13 },
+  adjBox: { backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginTop: 14 },
+  adjTitle: { fontWeight: "800", color: colors.text, fontSize: 13, marginBottom: 8 },
+  adjReasons: { flexDirection: "row", gap: 6 },
+  adjChip: { flex: 1, alignItems: "center", paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFF" },
+  adjChipActive: { backgroundColor: colors.danger, borderColor: colors.danger },
+  adjChipText: { color: colors.textSecondary, fontWeight: "700", fontSize: 12, textTransform: "capitalize" },
+  adjBtn: { paddingHorizontal: 18, justifyContent: "center", borderRadius: 10, backgroundColor: colors.danger },
+  adjBtnText: { color: "#FFF", fontWeight: "800", fontSize: 13 },
   title: { fontSize: 22, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },
   sub: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
 

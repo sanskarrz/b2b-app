@@ -1,0 +1,42 @@
+{
+  "summary": "RX Tech iteration_7 — Full E2E verification of the 14 client-requested distributor & pharmacist features (implemented in /app/backend/client_features.py + hooks in server.py + new /d /field /delivery /(tabs) screens). Wrote /app/backend/tests/test_client_features.py (39 tests, 8 test classes) covering auth/roles, manager permissions (api-keys 403), settings, disputes lifecycle, staff chat (staff & office), field order taking with margin+CD+offer, blacklist blocking, barcode auto-assign+lookup+conflict, area auto-assign (staff/deliveries/leads), stock adjust (damage/expiry), item detail remaining_stock, delivery photos gallery, auto-accept on no-overdue, auto bill generation, and the full cash-collection OTP flow (generate → deliver without OTP fails → wrong OTP fails → correct OTP succeeds). RESULT: **39/39 passed (100%)** — every documented behaviour is correct. Also smoke-tested the frontend on mobile viewport (390x844) as manager/sales/delivery/pharmacist: manager /d/more shows all 7 Team & Operations items (nav-team, nav-leads, nav-deliveries, nav-queries, nav-staff-chat, nav-bills, nav-order-settings) and hides ERP add-api-key (owner-only, correct); /d/queries renders open/in-progress/resolved counts + filter chips + query cards; /d/deliveries renders with 'Auto-assign riders by area' action; sales /field/home has 'Take an order' → /field/order-new lists 6 customers; pharmacist /(tabs)/more has 'My Queries & Disputes' → /disputes renders raised queries (OPEN + RESOLVED with resolution text). ONE PROCESS NOTE: on first render after code edits, Expo was serving a stale bundle showing only 3 of 7 items on /d/more; after `sudo supervisorctl restart expo` the full menu rendered. This is a test-environment quirk, not a code bug. Deprecated packages detected: NONE (no expo-av / barcode-scanner / background-fetch usage found in feature code). Warnings observed but pre-existing carry-over: 'shadow* deprecated / use boxShadow' and 'props.pointerEvents deprecated' (already noted in iteration_6).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "global", "issue": "Carry-over LOW: 'shadow*' style props deprecated warning — use boxShadow on RN Web. Non-blocking."},
+      {"component": "global", "issue": "Carry-over LOW: 'props.pointerEvents is deprecated. Use style.pointerEvents' warning. Non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_client_features.py",
+    "/app/test_reports/pytest/pytest_client_features.xml"
+  ],
+  "action_items": [
+    "None blocking. All 14 features verified end-to-end via 39 pytest cases and mobile-viewport UI smoke test.",
+    "(carry-over LOW) Silence 'shadow*' + 'pointerEvents' deprecated warnings when convenient."
+  ],
+  "critical_code_review_comments": [
+    "client_features.py is well-scoped and DB-backed. All endpoints are async, exclude _id, and validate inputs via Pydantic + explicit HTTP 400/403/404/409 responses.",
+    "Cash OTP verification correctly rejects missing OTP (400) and wrong OTP (400) before setting delivery_status=delivered — server.py:3859-3863. Verified live with 200/400/400/200 sequence.",
+    "Blacklist enforcement wired in place_order (server-side is_blacklisted check) — verified: pharma order → 403 with 'blacklisted' message; unblacklist → order allowed.",
+    "Auto-accept fires from maybe_auto_accept after field order insertion — verified: cust-4 (no overdue) order → status='accepted' immediately.",
+    "Manager api-keys returns 403 (owner-only via require_role) — verified. Manager dashboard/staff/settings/disputes/bills/chat/inventory all 200.",
+    "Field order breakdown correctly sums cd + extra + offer (capped 100%), applies to gross, and est_margin uses (mrp - ptr) * qty — verified numerically (3.5% total on 2%+1%+0.5%).",
+    "Auto barcode is deterministic per product_id and enforces uniqueness with a while-loop — safe; conflict test returns 409 on duplicate assignment."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_client_features.py (created — 39 tests, 8 classes)"
+  ],
+  "success_rate": {
+    "backend": "100% (39/39 passing)",
+    "frontend": "100% smoke — 5/5 critical screens render with all expected testIDs after expo restart"
+  },
+  "seed_data_creation": "Test-generated data prefixed with TEST_: 1 dispute ('TEST_wrong item', resolved w/ 'TEST_replaced'), 2 staff-chat messages ('TEST_hello office', 'TEST_office reply'), 2 field orders on cust-4, 1 stock adjustment ('TEST_broken pack'). Blacklist set+unset on demo user id. Auto-accept setting was toggled ON as part of TestAutoAccept — main agent may want to reset settings via PATCH /api/distributor/me/settings {auto_accept_no_overdue: false} if strict starting state is desired.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Auth quirks: /auth/email → email → 'Continue'; if password account, next screen has 'Sign in' button (NOT Continue); if OTP account, next screen /auth/otp shows 6 boxes + banner with dev OTP. For 6-box OTP, focus first box then use `await page.keyboard.type(otp)` — do NOT use page.fill('input',...) because the email input from previous route is still in the DOM and hidden. Endpoints: delivery uses /api/delivery/me/orders (NOT /api/delivery/orders); order state transitions use POST /api/distributor/orders/{id}/action with body {action:'accept'|'dispatch'|'deliver'}; delivery assignment is PATCH /api/distributor/orders/{id}/assign body {delivery_user_id: X}. Expo restart may be needed after edits to app/*.tsx for changes to render (Metro is in CI mode so file-watch reloads are disabled). demo@rxtech.com user has roles=[distributor,pharmacist] (both) — do not assert single 'role' field on this user.",
+  "rca_of_issue": "N/A — no bug reported. All 14 features working correctly end-to-end. If the client complains about missing menu items on /d/more, first `sudo supervisorctl restart expo` and hard-reload — Metro CI mode serves cached bundles across code edits."
+}

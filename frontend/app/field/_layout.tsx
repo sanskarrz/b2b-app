@@ -16,7 +16,9 @@ export default function FieldLayout() {
   return (
     <Tabs screenOptions={{ headerShown: false, tabBarShowLabel: false, tabBarStyle: styles.bar }}>
       <Tabs.Screen name="home" options={{ tabBarIcon: ({ focused }) => <Tab name="Pipeline" icon="funnel" focused={focused} /> }} />
+      <Tabs.Screen name="chat" options={{ tabBarIcon: ({ focused }) => <Tab name="Chat" icon="chatbubbles" focused={focused} /> }} />
       <Tabs.Screen name="profile" options={{ tabBarIcon: ({ focused }) => <Tab name="Profile" icon="person" focused={focused} /> }} />
+      <Tabs.Screen name="order-new" options={{ href: null }} />
     </Tabs>
   );
 }

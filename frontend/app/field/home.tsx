@@ -52,6 +52,10 @@ export default function FieldHome() {
         <Text style={styles.hi}>My Pipeline</Text>
         <Text style={styles.heroVal}>{formatINR(totalPipeline)}</Text>
         <Text style={styles.heroSub}>{(counts.new || 0) + (counts.contacted || 0) + (counts.visited || 0)} open · {counts.converted || 0} won</Text>
+        <TouchableOpacity style={styles.takeOrderBtn} onPress={() => router.push("/field/order-new")} testID="take-order-btn">
+          <Ionicons name="cart" size={16} color={colors.primary} />
+          <Text style={styles.takeOrderText}>Take an order</Text>
+        </TouchableOpacity>
       </LinearGradient>
 
       <View style={styles.searchWrap}>
@@ -114,6 +118,8 @@ const styles = StyleSheet.create({
   hi: { color: "rgba(255,255,255,0.9)", fontSize: 13, fontWeight: "700" },
   heroVal: { color: "#FFF", fontSize: 30, fontWeight: "800", marginTop: 2, letterSpacing: -1 },
   heroSub: { color: "rgba(255,255,255,0.9)", fontSize: 12.5, marginTop: 4 },
+  takeOrderBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#FFF", alignSelf: "flex-start", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, marginTop: 12 },
+  takeOrderText: { color: colors.primary, fontWeight: "800", fontSize: 13 },
   searchWrap: { flexDirection: "row", alignItems: "center", gap: 6, marginHorizontal: 12, marginTop: 12, marginBottom: 10, paddingHorizontal: 10, backgroundColor: colors.surface, borderRadius: 10, height: 38, borderWidth: 1, borderColor: colors.border },
   searchInput: { flex: 1, color: colors.text, fontSize: 13 },
   chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, height: 34 },

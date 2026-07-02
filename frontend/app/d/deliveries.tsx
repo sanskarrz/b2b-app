@@ -22,6 +22,9 @@ export default function Deliveries() {
   const [tab, setTab] = useState("to_assign");
   const [assignFor, setAssignFor] = useState<any | null>(null);
   const [proofFor, setProofFor] = useState<any | null>(null);
+  const [assigning, setAssigning] = useState(false);
+  const [photosOpen, setPhotosOpen] = useState(false);
+  const [photos, setPhotos] = useState<any[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -47,12 +50,28 @@ export default function Deliveries() {
     catch (e: any) { showError(e?.message || "Failed"); }
   };
 
+  const autoAssign = async () => {
+    setAssigning(true);
+    try {
+      const r = await api("/distributor/me/deliveries/auto-assign", { method: "POST" });
+      showSuccess(r.assigned > 0 ? `Auto-assigned ${r.assigned} order(s) by area` : `No area matches (${r.unmatched} unmatched). Set rider areas in Team.`);
+      await load();
+    } catch (e: any) { showError(e?.message || "Failed"); }
+    finally { setAssigning(false); }
+  };
+
+  const openPhotos = async () => {
+    setPhotosOpen(true);
+    try { setPhotos(await api("/distributor/me/delivery-photos")); }
+    catch (e: any) { showError(e?.message || "Could not load photos"); }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.topbar}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}><Ionicons name="arrow-back" size={20} color={colors.text} /></TouchableOpacity>
         <Text style={styles.topTitle}>Deliveries</Text>
-        <View style={{ width: 36 }} />
+        <TouchableOpacity onPress={openPhotos} style={styles.backBtn} testID="all-photos-btn"><Ionicons name="images-outline" size={20} color={colors.text} /></TouchableOpacity>
       </View>
 
       <View style={styles.tabs}>
@@ -62,6 +81,12 @@ export default function Deliveries() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {tab === "to_assign" && (
+        <TouchableOpacity style={[styles.autoBar, assigning && { opacity: 0.5 }]} onPress={autoAssign} disabled={assigning} testID="auto-assign-btn">
+          {assigning ? <ActivityIndicator color={colors.primary} size="small" /> : <><Ionicons name="flash" size={16} color={colors.primary} /><Text style={styles.autoText}>Auto-assign riders by area</Text></>}
+        </TouchableOpacity>
+      )}
 
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
@@ -137,6 +162,29 @@ export default function Deliveries() {
           </View>
         </Pressable>
       </Modal>
+
+      {/* All delivery photos gallery */}
+      <Modal visible={photosOpen} transparent animationType="slide" onRequestClose={() => setPhotosOpen(false)}>
+        <Pressable style={styles.modalBg} onPress={() => setPhotosOpen(false)}>
+          <Pressable style={[styles.modalCard, { maxHeight: "85%" }]} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.handle} />
+            <Text style={styles.modalTitle}>All delivery photos ({photos.length})</Text>
+            <FlatList
+              data={photos}
+              keyExtractor={(p) => p.order_id}
+              numColumns={2}
+              columnWrapperStyle={{ gap: 8 }}
+              ListEmptyComponent={<Text style={styles.emptyText}>No delivery photos yet</Text>}
+              renderItem={({ item: p }) => (
+                <TouchableOpacity style={styles.photoTile} onPress={() => { setPhotosOpen(false); setProofFor({ code: p.code, delivery_proof: { photo_base64: p.photo_base64, rider_name: p.rider_name, captured_at: p.captured_at, notes: p.notes, lat: p.lat, lng: p.lng } }); }}>
+                  <Image source={{ uri: p.photo_base64 }} style={styles.photoTileImg} />
+                  <Text style={styles.photoTileText} numberOfLines={1}>{p.customer_name}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -151,6 +199,11 @@ const styles = StyleSheet.create({
   tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   tabText: { color: colors.textSecondary, fontWeight: "700", fontSize: 12.5 },
   tabTextActive: { color: "#FFF" },
+  autoBar: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginHorizontal: 12, marginBottom: 4, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.primaryBg, borderWidth: 1, borderColor: colors.primarySoft },
+  autoText: { color: colors.primary, fontWeight: "800", fontSize: 13 },
+  photoTile: { flex: 1, marginBottom: 8 },
+  photoTileImg: { width: "100%", height: 130, borderRadius: 10, backgroundColor: colors.surface },
+  photoTileText: { color: colors.text, fontSize: 11.5, fontWeight: "600", marginTop: 4 },
   card: { backgroundColor: "#FFF", borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 8 },
   cardTop: { flexDirection: "row", justifyContent: "space-between" },
   code: { color: colors.textSecondary, fontWeight: "700", fontSize: 12 },

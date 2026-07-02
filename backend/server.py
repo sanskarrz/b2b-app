@@ -844,6 +844,32 @@ class PlaceOrderQuery(BaseModel):
     payment_method: str = "cash"  # cash | credit
 
 
+async def is_blacklisted(distributor_id: str, user_id: str) -> bool:
+    """A customer blacklisted by a distributor cannot place orders with them."""
+    cc = await db.customer_credit.find_one({"distributor_id": distributor_id, "user_id": user_id}, {"_id": 0})
+    return bool(cc and cc.get("blacklisted"))
+
+
+async def maybe_auto_accept(order_id: str, distributor: dict, cust_id: str) -> None:
+    """Auto-accept a freshly-placed order when the distributor enabled
+    'auto-accept (no overdue)' and the customer has no overdue payments."""
+    settings = (distributor or {}).get("settings") or {}
+    if not settings.get("auto_accept_no_overdue"):
+        return
+    overdue = await db.payments.count_documents({
+        "distributor_id": distributor["id"], "user_id": cust_id, "status": "overdue",
+    })
+    if overdue:
+        return
+    o = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not o or o.get("status") != "placed":
+        return
+    timeline = o.get("timeline", []) + [{"status": "accepted", "at": iso(now_utc()), "by": "auto", "note": "Auto-accepted (no overdue)"}]
+    await db.orders.update_one({"id": order_id}, {"$set": {
+        "status": "accepted", "auto_accepted": True, "timeline": timeline,
+    }})
+
+
 @api_router.post("/orders")
 async def place_order(payment_method: str = "cash", distributor_id: Optional[str] = None, user: dict = Depends(get_current_user)):
     query = {"user_id": user["id"]}
@@ -863,6 +889,8 @@ async def place_order(payment_method: str = "cash", distributor_id: Optional[str
     orders_created = []
     for dist_id, items in by_dist.items():
         d = await db.distributors.find_one({"id": dist_id}, {"_id": 0})
+        if await is_blacklisted(dist_id, user["id"]):
+            raise HTTPException(403, f"You are blacklisted by {d['short_name'] if d else 'this distributor'} and cannot place orders. Please contact them.")
         total = 0.0
         order_items = []
         for it in items:
@@ -921,7 +949,9 @@ async def place_order(payment_method: str = "cash", distributor_id: Optional[str
             "amount_on_credit": total if pm == "credit" else 0,
         }
         await db.orders.insert_one({**order})
-        orders_created.append(order)
+        await maybe_auto_accept(order["id"], d, user["id"])
+        fresh = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+        orders_created.append(fresh or order)
         code_suffix += 1
 
     # Clear cart (only the placed items)
@@ -3374,6 +3404,7 @@ async def distributor_customer_detail(cust_id: str, user: dict = Depends(get_cur
             "credit_limit": c_lim, "credit_used": c_used, "credit_available": round(c_lim - c_used, 2),
             "credit_used_pct": round((c_used / max(c_lim, 1)) * 100, 1),
             "credit_days": cc.get("credit_days", 21), "settlement_discount_pct": cc.get("settlement_discount_pct", 1.5),
+            "blacklisted": bool(cc.get("blacklisted")), "blacklist_reason": cc.get("blacklist_reason"),
         },
         "stats": {
             "total_spent": round(sum(o["total"] for o in orders), 2),
@@ -3754,6 +3785,7 @@ class DeliverReq(BaseModel):
     lng: Optional[float] = None
     notes: Optional[str] = None
     amount_collected: Optional[float] = None
+    cash_otp: Optional[str] = None
 
 
 class FailReq(BaseModel):
@@ -3822,15 +3854,26 @@ async def delivery_complete(order_id: str, req: DeliverReq, user: dict = Depends
         raise HTTPException(404, "Delivery not found")
     if not req.photo_base64:
         raise HTTPException(400, "A delivery photo is required as proof")
+    # Cash collection OTP verification (demo): if a cash OTP was generated for
+    # this order, the rider must enter it to confirm cash was collected.
+    if o.get("payment_method") == "cash" and o.get("cash_otp"):
+        if not req.cash_otp:
+            raise HTTPException(400, "Enter the cash collection OTP shown to the customer")
+        if req.cash_otp.strip() != o["cash_otp"]:
+            raise HTTPException(400, "Incorrect cash OTP. Ask the customer to confirm the code.")
     proof = {
         "photo_base64": req.photo_base64, "lat": req.lat, "lng": req.lng,
         "notes": req.notes, "captured_at": iso(now_utc()), "rider_id": user["id"], "rider_name": user.get("name"),
         "amount_collected": req.amount_collected,
     }
-    await db.orders.update_one({"id": order_id}, {"$set": {
+    set_fields = {
         "status": "delivered", "delivery_status": "delivered", "delivery_confirmed": True,
         "delivered_at": iso(now_utc()), "delivery_proof": proof,
-    }})
+    }
+    if o.get("payment_method") == "cash":
+        set_fields["cash_collected"] = req.amount_collected if req.amount_collected is not None else o.get("total", 0)
+        set_fields["cash_otp_verified"] = bool(o.get("cash_otp"))
+    await db.orders.update_one({"id": order_id}, {"$set": set_fields})
     return {"success": True}
 
 
@@ -4067,6 +4110,10 @@ async def team_performance(user: dict = Depends(get_current_user)):
 
 # Register router
 app.include_router(api_router)
+
+# Client-requested feature endpoints (imported after all helpers are defined)
+from client_features import feature_router  # noqa: E402
+app.include_router(feature_router)
 
 app.add_middleware(
     CORSMiddleware,

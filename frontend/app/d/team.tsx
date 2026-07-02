@@ -27,6 +27,19 @@ export default function Team() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<any>({ name: "", email: "", password: "", role: "field_sales", phone: "" });
   const [busy, setBusy] = useState(false);
+  const [areaFor, setAreaFor] = useState<any | null>(null);
+  const [areaText, setAreaText] = useState("");
+
+  const saveAreas = async () => {
+    if (!areaFor) return;
+    const areas = areaText.split(",").map((a) => a.trim()).filter(Boolean);
+    try {
+      await api(`/distributor/me/staff/${areaFor.id}/areas`, { method: "PATCH", body: { areas } });
+      showSuccess("Areas updated");
+      setAreaFor(null); setAreaText("");
+      await load();
+    } catch (e: any) { showError(e?.message || "Failed"); }
+  };
 
   const load = useCallback(async () => {
     try { setStaff(await api("/distributor/me/staff")); }
@@ -95,6 +108,13 @@ export default function Team() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{s.name}</Text>
                   <Text style={styles.sub}>{m.l} · {s.email}</Text>
+                  {(s.role === "delivery" || s.role === "field_sales") && (
+                    <TouchableOpacity onPress={() => { setAreaFor(s); setAreaText((s.areas || []).join(", ")); }} testID={`areas-${s.id}`}>
+                      <Text style={styles.areasLine}>
+                        <Ionicons name="map-outline" size={11} color={colors.primary} /> {(s.areas && s.areas.length) ? s.areas.join(", ") : "Set areas"}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                   {!s.active && <Text style={styles.inactive}>INACTIVE</Text>}
                 </View>
                 <TouchableOpacity onPress={() => toggleActive(s)} style={styles.toggle}>
@@ -105,6 +125,21 @@ export default function Team() {
           }}
         />
       )}
+
+      <Modal visible={!!areaFor} transparent animationType="slide" onRequestClose={() => setAreaFor(null)}>
+        <Pressable style={styles.modalBg} onPress={() => setAreaFor(null)}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.handle} />
+            <Text style={styles.modalTitle}>Coverage areas · {areaFor?.name}</Text>
+            <Text style={styles.fieldLabel}>Comma-separated areas / pincodes. Used for auto-assigning deliveries & leads.</Text>
+            <TextInput value={areaText} onChangeText={setAreaText} placeholder="e.g. Thane West, Mulund, 400601" placeholderTextColor={colors.textTertiary} style={styles.input} />
+            <TouchableOpacity style={styles.saveBtn} onPress={saveAreas} testID="save-areas">
+              <Text style={styles.saveText}>Save areas</Text>
+            </TouchableOpacity>
+            <View style={{ height: 16 }} />
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.modalBg} onPress={() => setOpen(false)}>
@@ -156,6 +191,7 @@ const styles = StyleSheet.create({
   roleIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   name: { fontWeight: "800", color: colors.text, fontSize: 15 },
   sub: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  areasLine: { color: colors.primary, fontSize: 11.5, marginTop: 4, fontWeight: "600" },
   inactive: { color: colors.danger, fontSize: 9.5, fontWeight: "800", marginTop: 3 },
   toggle: { padding: 4 },
   empty: { alignItems: "center", marginTop: 50, gap: 8 },

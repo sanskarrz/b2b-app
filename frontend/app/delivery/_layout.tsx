@@ -17,6 +17,7 @@ export default function DeliveryLayout() {
     <Tabs screenOptions={{ headerShown: false, tabBarShowLabel: false, tabBarStyle: styles.bar }}>
       <Tabs.Screen name="home" options={{ tabBarIcon: ({ focused }) => <Tab name="Today" icon="bicycle" focused={focused} /> }} />
       <Tabs.Screen name="completed" options={{ tabBarIcon: ({ focused }) => <Tab name="History" icon="checkmark-done" focused={focused} /> }} />
+      <Tabs.Screen name="chat" options={{ tabBarIcon: ({ focused }) => <Tab name="Chat" icon="chatbubbles" focused={focused} /> }} />
       <Tabs.Screen name="profile" options={{ tabBarIcon: ({ focused }) => <Tab name="Profile" icon="person" focused={focused} /> }} />
       <Tabs.Screen name="order/[id]" options={{ href: null }} />
     </Tabs>

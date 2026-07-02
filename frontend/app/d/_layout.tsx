@@ -52,6 +52,11 @@ export default function DLayout() {
       <Tabs.Screen name="team" options={{ href: null }} />
       <Tabs.Screen name="leads" options={{ href: null }} />
       <Tabs.Screen name="deliveries" options={{ href: null }} />
+      <Tabs.Screen name="settings" options={{ href: null }} />
+      <Tabs.Screen name="queries" options={{ href: null }} />
+      <Tabs.Screen name="bills" options={{ href: null }} />
+      <Tabs.Screen name="staff-chat/index" options={{ href: null }} />
+      <Tabs.Screen name="staff-chat/[id]" options={{ href: null }} />
     </Tabs>
   );
 }

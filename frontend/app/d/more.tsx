@@ -106,6 +106,26 @@ export default function DistributorMore() {
             <Text style={styles.itemText}>Deliveries</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
           </TouchableOpacity>
+          <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/queries")} testID="nav-queries">
+            <Ionicons name="help-buoy-outline" size={20} color={colors.text} />
+            <Text style={styles.itemText}>Query Management</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/staff-chat")} testID="nav-staff-chat">
+            <Ionicons name="chatbubbles-outline" size={20} color={colors.text} />
+            <Text style={styles.itemText}>Team Chat</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/bills")} testID="nav-bills">
+            <Ionicons name="document-text-outline" size={20} color={colors.text} />
+            <Text style={styles.itemText}>Auto Bills</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/settings")} testID="nav-order-settings">
+            <Ionicons name="options-outline" size={20} color={colors.text} />
+            <Text style={styles.itemText}>Order Settings</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
         </View>
 
         {/* ERP Integration — owner only */}
