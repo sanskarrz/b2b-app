@@ -89,3 +89,38 @@ Designs sourced from user's Figma "Medical Order App" page (file: Recovery-Call-
 - Categories/filters on home not yet drilled into
 - No notifications / push yet
 - Profile editing not yet wired (placeholder in /more)
+
+
+## Multi-role platform + 14 client features (Feb 2026)
+Pivoted from a single-app role toggle to isolated role-based apps behind one login (`/auth/email` → password for staff, OTP for owner/pharmacist). `routeByRole` sends: owner/manager→`/d`, field_sales→`/field`, delivery→`/delivery`, pharmacist→`/(tabs)`.
+
+**Roles & permissions**
+- Owner: full access incl. ERP API keys (`/distributor/me/api-keys`, owner-only via `require_owner_distributor`).
+- Manager: full operational access via `get_owned_distributor` fallback to `distributor_id`; ERP keys return 403; ERP section hidden in `/d/more`.
+- Field Sales: own assigned leads only; can take orders. Delivery: own assigned orders + proof/OTP.
+
+**14 features implemented (backend in `/app/backend/client_features.py` = `feature_router`; hooks in `server.py`):**
+1. Cash-collection OTP (demo, in-app) — `POST /delivery/orders/{id}/cash-otp`; verified in `/deliver`.
+2/5. Disputes / Query mgmt — `/disputes` (pharma), `/distributor/me/disputes` (+filters, resolve). Types: wrong_supply, return, credit, other.
+3. Staff↔office chat — `/staff/chat`, `/distributor/me/staff-chat/*` (reusable `ChatView`).
+4/9/10. Field order-taking — `/field/customers`, `/field/products` (margin), `POST /field/orders` (CD + extra CD + offer% 3/4/5, est_margin).
+6. Blacklist — `PATCH /distributor/me/customers/{id}/blacklist`; blocks `POST /orders` (403).
+7. Barcode — `auto-barcode`, `GET /products/barcode/{code}`, per-product set.
+8. Area auto-assign — staff `areas`; `deliveries/auto-assign` + `leads/auto-assign`.
+11. Stock adjust (damage/expiry) — `POST /distributor/me/inventory/{pid}/adjust` + `stock_adjustments` log.
+12. Item detail remaining stock + delivery photos gallery — `/distributor/me/orders/{id}/detail`, `/distributor/me/delivery-photos`.
+13. Auto-accept (no overdue) — `/distributor/me/settings.auto_accept_no_overdue`; hooked in `place_order` + `field/orders`.
+14. Area & time auto bill generation — `POST /distributor/me/bills/generate`, `GET /distributor/me/bills`.
+
+New collections: `disputes`, `staff_chat`, `stock_adjustments`, `bills`. New order fields: `cash_otp`, `gross_total`, `cash_discount_pct`, `extra_cd_pct`, `offer_pct`, `est_margin`, `billed`, `auto_accepted`.
+
+**Testing:** 39/39 pytest pass (`/app/backend/tests/test_client_features.py`), frontend smoke green. Report: `/app/test_reports/iteration_7.json`.
+
+**MOCKED:** Cash OTP is demo (returned in API / shown in-app, no SMS). Bill scheduling is a label only (no cron).
+
+## Next steps / backlog
+- Real SMS for cash OTP + notifications (needs Twilio or similar API key).
+- SendGrid for OTP/email delivery (production).
+- Payment gateway (Razorpay/Stripe UPI) for in-app collections.
+- Real cron for scheduled area-wise bill generation.
+- Consider refactoring `server.py` (4100+ lines) into routers/models modules.
