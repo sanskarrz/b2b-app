@@ -121,6 +121,11 @@ export default function DistributorMore() {
             <Text style={styles.itemText}>Auto Bills</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
           </TouchableOpacity>
+          <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/sync")} testID="nav-sync">
+            <Ionicons name="sync-outline" size={20} color={colors.text} />
+            <Text style={styles.itemText}>Data Sync (Import / Export)</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/settings")} testID="nav-order-settings">
             <Ionicons name="options-outline" size={20} color={colors.text} />
             <Text style={styles.itemText}>Order Settings</Text>

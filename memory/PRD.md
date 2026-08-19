@@ -119,6 +119,21 @@ New collections: `disputes`, `staff_chat`, `stock_adjustments`, `bills`. New ord
 **MOCKED:** Cash OTP is demo (returned in API / shown in-app, no SMS). Bill scheduling is a label only (no cron).
 
 ## Next steps / backlog
+
+## ERP Data Sync (Import / Export) — Aug 2026
+Distributors' billing software (Medica Ultimate) has **no API** — only a daily **SQL Server `.bak`** backup (unparseable at runtime). Instead we ingest the **CSV/Excel exports** every such software produces. Screen: `/d/sync` (owner/manager only), linked from Distributor More → "Data Sync".
+
+**IN (their system → app):** upload Item/Party/Ledger export via **file** (expo-document-picker) or **public Google Drive link**. Backend `sync_engine.py` auto-detects the header row (skips title rows) and **fuzzily maps columns** to product/party/ledger. **De-dupes** via upsert on `(distributor_id, dedupe_key)` — products keyed on item code or name+pack, parties on code or name, ledger on hash(voucher|date|party|amount). Stored in `dist_products` / `dist_parties` / `dist_ledger`.
+
+**OUT (app → their system):** export orders placed by pharmacies to CSV/XLSX, **Full** or **incremental (since last export)** — one row per line item with Medica-friendly columns. Downloaded (web anchor) / shared (native).
+
+**Auto-sync:** background asyncio loop re-fetches the saved Drive link per distributor `interval_hours` (default 24). Manual "Fetch & Import" also available.
+
+Endpoints: `POST /api/distributor/me/sync/import`, `GET /sync/data`, `POST /sync/clear`, `POST /sync/export`, `GET/PATCH /sync/settings`, `GET /sync/logs`. New collections: `dist_products`, `dist_parties`, `dist_ledger`, `sync_settings`, `sync_logs`.
+
+**Testing:** 15/15 pytest pass (`/app/backend/tests/test_erp_sync.py`), frontend E2E green (iteration_8). **NOTE:** raw `.bak` cannot be auto-parsed — distributors must export CSV/Excel from their software.
+
+### Older backlog
 - Real SMS for cash OTP + notifications (needs Twilio or similar API key).
 - SendGrid for OTP/email delivery (production).
 - Payment gateway (Razorpay/Stripe UPI) for in-app collections.

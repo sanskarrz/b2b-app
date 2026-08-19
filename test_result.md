@@ -714,3 +714,62 @@ agent_communication:
          - POST /api/credit-notes → 200, code "CN-2404" created.
 
       No 4xx/5xx errors. All review-request items verified working end-to-end against the public preview URL.
+
+## ERP Data Sync (Import/Export) — Aug 2026
+backend:
+  - task: "ERP data sync: flexible CSV/XLSX import + orders export + settings/logs + auto-sync"
+    implemented: true
+    working: true
+    file: "/app/backend/sync_engine.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: >
+          Their billing software (Medica Ultimate) has no API — only a daily SQL Server .bak backup
+          (unparseable at runtime). Built a format-agnostic CSV/XLSX importer that auto-detects the
+          header row (handles title rows) and fuzzily maps columns to Item Master / Party Master /
+          Ledger. Endpoints (owner/manager only): POST /api/distributor/me/sync/import (source=file base64
+          OR source=drive google-drive link), GET /sync/data (counts+preview), POST /sync/clear,
+          POST /sync/export (mode=full|incremental, format=csv|xlsx → returns base64 file of app orders,
+          one row per line item, Medica-friendly columns), GET/PATCH /sync/settings (drive_url, auto_sync,
+          interval_hours), GET /sync/logs. De-dupe via upsert on (distributor_id, dedupe_key): products keyed
+          on item code or name+pack, parties on code or name, ledger on hash(voucher|date|party|amount).
+          Background asyncio auto_sync_loop re-fetches saved Drive link per distributor interval.
+          Self-tested via API as owner: import 3 product rows → 2 inserted (dup collapsed); re-import → 3 updated,
+          0 inserted; party import ok; export full xlsx (24 rows/20 orders); incremental correctly returns
+          "no new orders"; settings persist; logs recorded; manager 200; field_sales 403.
+
+frontend:
+  - task: "Data Sync screen (import file/drive, export, auto-sync toggle, history)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/d/sync.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: >
+          New screen at /d/sync linked from Distributor More → "Data Sync (Import / Export)". Upload
+          Excel/CSV via expo-document-picker; paste+save Google Drive link + "Fetch & Import"; auto-sync
+          Switch; imported-data stat cards (Items/Parties/Ledger); export grid (All/New × Excel/CSV) that
+          writes base64 to cache and opens share sheet (web downloads via anchor); sync history list; clear
+          imported data. Renders correctly (smoke screenshot); needs auth-driven E2E testing.
+
+metadata:
+  test_sequence: 8
+
+agent_communication:
+    - agent: "main"
+      message: >
+        Please test the new ERP Data Sync feature. Backend endpoints under /api/distributor/me/sync/* are
+        owner/manager scoped. Owner login: owner@rxtech.com (OTP, dev_otp in send-otp response).
+        Manager: manager@rxtech.com / Pass@123. Field sales sales@rxtech.com / Pass@123 (should get 403 on sync).
+        BACKEND: verify import (base64 CSV with a title row + duplicate rows → dedupe), re-import updates not inserts,
+        export full & incremental (incremental returns 400 when nothing new), settings persist, logs, role permissions.
+        FRONTEND: log in as owner, open More → Data Sync; test Drive link save + auto-sync toggle + export buttons
+        (file download/share) + history render. File upload picker is hard to automate — focus on drive/export/settings.

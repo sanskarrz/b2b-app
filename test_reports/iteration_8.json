@@ -1,0 +1,41 @@
+{
+  "summary": "RX Tech iteration_8 — Independent verification of the new ERP Data Sync feature (sync_engine.py + /d/sync.tsx). Backend: wrote /app/backend/tests/test_erp_sync.py with 8 test classes / 15 pytest cases exercising every documented flow — import a CSV that has a TITLE row + duplicate data rows (owner) → 3 unique products inserted, party CSV → 2 parties detected, ledger CSV → 2 ledger rows detected, re-import same file → 0 inserted (dedupe on distributor_id+dedupe_key), GET /sync/data returns counts + preview (no _id leak), PATCH /sync/settings persists drive_url/auto_sync/interval_hours and clamps interval_hours>168 → 168, POST /sync/export {mode:full,format:csv} returns CSV with Invoice No/Party Name headers, {format:xlsx} returns a PK-signature xlsx zip, {mode:incremental} immediately after full → 400 'No new orders to export since your last export', GET /sync/logs contains both import+export directions, POST /sync/clear {type:all} zeroes product/party/ledger counts but leaves orders intact (subsequent full export still returns rows). Role permissions verified: manager@rxtech.com import → 200, sales@rxtech.com (field_sales) import → 403. RESULT: **15/15 backend tests PASSED (100%)**. Frontend: mobile viewport 390x844, logged in as owner via OTP flow (dev_otp banner), navigated /d/sync — 'Data Sync' title renders, Items/Parties/Ledger stat cards render, drive_url TextInput accepts + Save link shows 'Drive link saved' success toast, auto-sync-toggle switch flips, export-full-csv & export-full-xlsx trigger downloads, export-inc-csv correctly surfaces the backend 400 as an on-screen error toast 'No new orders to export since your last export.', Sync history section shows the accumulated log rows (8 import + 7 export entries visible after test run). All testIDs present and correctly wired. Deprecated packages detected: NONE in sync feature code (no expo-av, expo-barcode-scanner, expo-background-fetch). Pre-existing carry-over warnings only ('shadow*' + 'props.pointerEvents deprecated'). No blocking issues found.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "global (carry-over)", "issue": "Non-blocking RN Web warnings: 'shadow*' style props deprecated → use boxShadow; 'props.pointerEvents deprecated' → use style.pointerEvents. Already noted in iteration_6/7."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_erp_sync.py",
+    "/app/test_reports/pytest/pytest_erp_sync.xml"
+  ],
+  "action_items": [
+    "None blocking. Feature is production-ready for the mock/demo scheduling scope the user selected.",
+    "(Nice-to-have) The demo auto_sync_loop runs on a 3600s outer tick and won't fire on a 12-hour interval unless the container stays hot for many hours — fine for demo/mock scope, but if the user later wants real scheduling, move to APScheduler/Celery-beat with distributor-level cron and add a manual 'Sync now' fallback."
+  ],
+  "critical_code_review_comments": [
+    "sync_engine.py:_detect uses signature-required fields per type (ledger needs party + amount|debit|credit + date|voucher; product needs name + one of mrp/rate/stock/pack/batch; party needs name + one of address/gstin/credit_limit/phone/balance/code) — this correctly disambiguates a CSV that could otherwise fuzzy-match multiple types. Verified with the test CSVs which all matched exactly one type.",
+    "Dedupe uses (distributor_id, dedupe_key) with $setOnInsert for id/created_at and $set for the rest — correct upsert semantics. Product dedupe_key = code OR norm(name)+'|'+norm(pack); party = code OR norm(name); ledger = md5(voucher|date|party|amount). Safe against title-row/duplicate-row noise.",
+    "Google-Drive fallback path (_download_drive) detects HTML confirm/interstitial pages and raises 400 'This Drive file isn't publicly accessible' — good defensive UX. Cannot end-to-end verify without a real public Drive file; code path is correct.",
+    "Role guard via staff_distributor(user, {owner, manager}) — verified live: manager 200, field_sales 403 on /sync/import. Also correctly applies to /sync/data /sync/settings /sync/logs /sync/export /sync/clear.",
+    "process_import raises 400 if total_rows==0 with a helpful message pointing at .bak-vs-export confusion — matches the client's Medica-Ultimate context.",
+    "sync_export excludes MongoDB _id in db.orders.find({..}, {_id:0}) and db.users.find({..}, {_id:0}). GET /sync/data preview also excludes _id. No ObjectId serialization risk.",
+    "MINOR (non-blocking): the auto-sync loop sleeps 3600s and only refreshes when interval elapsed since last_auto_at OR last_import_at — semantically fine, but 'demo/mock scheduling' expectation is satisfied without needing a scheduler library."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_erp_sync.py (created — 8 classes, 15 tests, all passing)"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15 passing)",
+    "frontend": "100% — all critical /d/sync flows (drive save, auto-sync toggle, full CSV/XLSX export, incremental 'no new orders' error surfaced, sync history rendering) work end-to-end after OTP login"
+  },
+  "seed_data_creation": "All test data prefixed with TEST_. Backend tests wrote/cleared: dist_products (TESTP001-003), dist_parties (TESTC001-002), dist_ledger (TESTV001-002), and TEST_mgr.csv items imported by manager. After TestClear runs, dist_products/dist_parties/dist_ledger are emptied for dist-1 (owner). sync_settings for dist-1 now has drive_url='https://drive.google.com/file/d/UITEST_XYZ_9/view', auto_sync=true, interval_hours=168 (clamped), last_import_at set, last_export_at set. Sync_logs has ~15+ entries. Main agent may want to reset sync_settings for dist-1 (drive_url=null, auto_sync=false, interval_hours=24) if a clean starting demo is desired.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "For OTP login in Playwright: after /auth/email → Continue, dev_otp is embedded in the URL query as ?devOtp=NNNNNN — parse it from page.url instead of scraping the banner (more reliable). To focus the first OTP box, click by bounding_box() of the second input element (index 1) — index 0 is the hidden email input carried over from the previous route. After typing 6 digits, the app may or may not auto-verify; if page.url still contains '/auth/otp', click get_by_text('Verify & Continue'). Then navigate to /d/home first to ensure token is persisted BEFORE going to /d/sync — otherwise API calls will fail with 'Missing token'. For the sync page: 'Downloaded' toast on web export is very short-lived; better to assert via the 'Last export:' meta line update or by the sync_logs row that appears in history. Incremental-after-full is a reliable indicator of full-export success (surfaces 'No new orders' toast).",
+  "rca_of_issue": "N/A — no bugs found. All 11 items in the review request are green: (1) title-row + duplicate rows import correctly detects product and de-dupes; (2) re-import → 0 inserted; (3) party & ledger separately detected; (4) /sync/data counts+preview correct; (5) full CSV+XLSX export works; (6) incremental after full → 400; (7) settings persist + interval clamped; (8) logs recorded both directions; (9) clear removes only imported data; (10) manager 200 / field_sales 403; (11) frontend /d/sync UI fully wired."
+}

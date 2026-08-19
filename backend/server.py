@@ -4115,6 +4115,10 @@ app.include_router(api_router)
 from client_features import feature_router  # noqa: E402
 app.include_router(feature_router)
 
+# ERP data-sync (import/export) endpoints
+from sync_engine import sync_router, auto_sync_loop  # noqa: E402
+app.include_router(sync_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -4129,6 +4133,8 @@ async def startup():
     await seed_database()
     await seed_distributor_demo()
     await seed_team_demo()
+    import asyncio
+    asyncio.create_task(auto_sync_loop())
 
 
 @app.on_event("shutdown")
