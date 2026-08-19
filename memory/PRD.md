@@ -134,6 +134,9 @@ Endpoints: `POST /api/distributor/me/sync/import`, `GET /sync/data`, `POST /sync
 **Testing:** 15/15 pytest pass (`/app/backend/tests/test_erp_sync.py`), frontend E2E green (iteration_8). **NOTE:** raw `.bak` cannot be auto-parsed — distributors must export CSV/Excel from their software.
 
 ### Older backlog
+
+## Desktop Web (Distributor Panel) — Aug 2026
+The Expo app already runs on web (React Native Web). Made the **distributor-side apps** (`/d` owner/manager, `/field`, `/delivery`) responsive: on web ≥900px a persistent **left sidebar** (`src/components/WebSidebar.tsx` → `WebShell` + `useIsWideWeb`) replaces the bottom tab bar, content is centered at max-width 1200px. Phone/native keep bottom tabs unchanged. Pharmacist stays mobile-first (unchanged). Sidebar mirrors all features (Dashboard/Orders/Stock/Customers/Collections + Operations: Team, CRM, Deliveries, Queries, Team Chat, Auto Bills, Data Sync, Order Settings + Account/ERP + Sign out). Verified via web login (owner) — dashboard + sub-route navigation keep the sidebar persistent. Deploy via Publish; custom domain configured post-publish.
 - Real SMS for cash OTP + notifications (needs Twilio or similar API key).
 - SendGrid for OTP/email delivery (production).
 - Payment gateway (Razorpay/Stripe UPI) for in-app collections.
