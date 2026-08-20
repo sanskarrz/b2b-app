@@ -428,7 +428,7 @@ export default function Search() {
               </View>
             </View>
 
-            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 30 }}>
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: cart.count > 0 ? 110 : 30 }}>
               {tab === "mapped" ? (
                 matches.length === 0 ? (
                   <View style={styles.empty}>
@@ -486,12 +486,42 @@ export default function Search() {
           </>
         )}
       </KeyboardAvoidingView>
+
+      {/* Sticky View Cart bar — checkout directly from search */}
+      {cart.count > 0 && (
+        <View style={styles.cartBar}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cartBarCount}>
+              {cart.count} item{cart.count > 1 ? "s" : ""} in cart
+            </Text>
+            <Text style={styles.cartBarTotal}>{formatINRFull(cart.total || 0)}</Text>
+          </View>
+          <TouchableOpacity style={styles.cartBarBtn} onPress={() => router.push("/cart")} testID="search-view-cart">
+            <Ionicons name="cart" size={17} color="#FFF" />
+            <Text style={styles.cartBarBtnText}>View Cart</Text>
+            <Ionicons name="chevron-forward" size={16} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  cartBar: {
+    position: "absolute", bottom: 0, left: 0, right: 0,
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: "#FFF", borderTopWidth: 1, borderTopColor: colors.border,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: Platform.OS === "ios" ? 28 : 14,
+  },
+  cartBarCount: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
+  cartBarTotal: { fontSize: 17, color: colors.text, fontWeight: "800", marginTop: 1 },
+  cartBarBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.primary, paddingHorizontal: 18, paddingVertical: 13, borderRadius: 12,
+  },
+  cartBarBtnText: { color: "#FFF", fontWeight: "800", fontSize: 14 },
   header: {
     flexDirection: "row",
     alignItems: "center",

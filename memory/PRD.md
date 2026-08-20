@@ -135,6 +135,11 @@ Endpoints: `POST /api/distributor/me/sync/import`, `GET /sync/data`, `POST /sync
 
 ### Older backlog
 
+## Fixes — Aug 2026
+- **Sticky "View Cart" bar on `/search`** (`app/search.tsx`): after adding a medicine from search results, a bottom bar shows item count + total with a **View Cart** button → `/cart`, so users can check out without navigating back. Hidden when cart is empty; list bottom padding bumps to 110 so results aren't covered.
+- **BUG: Data Sync export wouldn't download on web** (`app/d/sync.tsx`). Root cause: the code built a `data:` URI and called `.click()` on an anchor that was **never appended to the DOM** (blocked by Firefox/Safari; large base64 also truncates in data URIs). Fixed with **Blob + `URL.createObjectURL`** and an anchor appended to `document.body`, then revoked. Native path unchanged (FileSystem + expo-sharing, now with UTI + graceful fallback). Verified via real browser `download` events (iteration_9): CSV 3654 B, XLSX 7720 B.
+  - Note: "New · Excel/CSV" (incremental) correctly returns 400 "No new orders to export since your last export" when nothing is new — expected, not a bug.
+
 ## Desktop Web (Distributor Panel) — Aug 2026
 The Expo app already runs on web (React Native Web). Made the **distributor-side apps** (`/d` owner/manager, `/field`, `/delivery`) responsive: on web ≥900px a persistent **left sidebar** (`src/components/WebSidebar.tsx` → `WebShell` + `useIsWideWeb`) replaces the bottom tab bar, content is centered at max-width 1200px. Phone/native keep bottom tabs unchanged. Pharmacist stays mobile-first (unchanged). Sidebar mirrors all features (Dashboard/Orders/Stock/Customers/Collections + Operations: Team, CRM, Deliveries, Queries, Team Chat, Auto Bills, Data Sync, Order Settings + Account/ERP + Sign out). Verified via web login (owner) — dashboard + sub-route navigation keep the sidebar persistent. Deploy via Publish; custom domain configured post-publish.
 - Real SMS for cash OTP + notifications (needs Twilio or similar API key).

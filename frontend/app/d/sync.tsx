@@ -113,19 +113,34 @@ export default function DataSync() {
     setBusy(`${mode}-${format}`);
     try {
       const r = await api("/distributor/me/sync/export", { method: "POST", body: { mode, format }, timeoutMs: 120000 });
-      const dataUri = `data:${r.mime};base64,${r.base64}`;
       if (Platform.OS === "web") {
-        const a = document.createElement("a"); a.href = dataUri; a.download = r.filename; a.click();
-        showSuccess(`${r.rows} rows from ${r.orders} orders`, "Downloaded");
+        // Blob download — data: URIs get blocked/truncated for larger files, and the
+        // anchor must be in the DOM for Firefox/Safari to honour the click.
+        const bin = atob(r.base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: r.mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = r.filename;
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1500);
+        showSuccess(`${r.filename} · ${r.rows} rows from ${r.orders} orders`, "Downloaded");
       } else {
-        const FileSystem = await import("expo-file-system/legacy");
-        const Sharing = await import("expo-sharing");
+        const FileSystem = await import("expo-file-system/legacy").catch(() => null as any);
+        const Sharing = await import("expo-sharing").catch(() => null as any);
+        if (!FileSystem) { showError("File system unavailable on this device", "Export failed"); return; }
         const dest = `${FileSystem.cacheDirectory}${r.filename}`;
         await FileSystem.writeAsStringAsync(dest, r.base64, { encoding: FileSystem.EncodingType.Base64 });
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(dest, { mimeType: r.mime, dialogTitle: "Export orders" });
-        } else { showInfo("Saved to app storage"); }
-        showSuccess(`${r.rows} rows from ${r.orders} orders`, "Export ready");
+        if (Sharing && (await Sharing.isAvailableAsync())) {
+          await Sharing.shareAsync(dest, { mimeType: r.mime, dialogTitle: "Export orders", UTI: format === "csv" ? "public.comma-separated-values-text" : "com.microsoft.excel.xlsx" });
+          showSuccess(`${r.rows} rows from ${r.orders} orders`, "Export ready");
+        } else {
+          showInfo(`Saved as ${r.filename} in app storage`, "Export ready");
+        }
       }
       await load();
     } catch (e: any) {

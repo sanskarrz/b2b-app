@@ -1,0 +1,38 @@
+{
+  "summary": "RX Tech iteration_9 — verified the two changes from this iteration. (1) BUG FIX (Distributor Data Sync export download on web): backend POST /api/distributor/me/sync/export still returns success:true with filename/mime/rows/orders/base64 for mode=full format=csv AND format=xlsx (base64 decodes to a valid CSV whose header contains 'invoice/party/order', and a valid xlsx whose bytes start with the 'PK' zip signature and contain xl/ entries). FRONTEND (owner @ /d/sync, desktop viewport 1280x832): using page.expect_download() to capture the real browser download event — export-full-csv fired a download event with filename 'rxtech-orders-20260820-0547.csv' (3654 bytes saved to disk) and export-full-xlsx fired a download for 'rxtech-orders-20260820-0547.xlsx' (7720 bytes). The Blob + URL.createObjectURL + document.body.appendChild anchor fix WORKS. Incremental exports (export-inc-csv / export-inc-xlsx) correctly returned HTTP 400 'No new orders to export since your last export' because dist-1's sync_settings.last_export_at was already populated from iteration_8 — this is the EXPECTED behaviour called out in the review request, not a bug. (2) FEATURE (Sticky 'View Cart' bar on pharmacist /search, mobile viewport 390x844): bar correctly HIDDEN when cart empty; after adding an item via the QtyInputAdd '+' the sticky bar renders at the bottom of the screen with 'search-view-cart' testID, shows '1 item in cart' + '₹30', and tapping it navigates to /cart (URL asserted). ScrollView contentContainerStyle padding-bottom already switches to 110 when cart.count > 0 so the last search result is not covered. addOffer/incOffer/decOffer all call refreshCart() after each cart mutation so the bar updates. Backend export test: 3/3 pass (test_export_download.py). Deprecated packages detected: NONE new. Pre-existing carry-over warnings only ('shadow*' + 'props.pointerEvents deprecated'). No blocking issues.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "global (carry-over)", "issue": "Non-blocking RN Web warnings: 'shadow*' style props deprecated -> use boxShadow; 'props.pointerEvents deprecated' -> use style.pointerEvents. Already noted in iteration_6/7/8."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_export_download.py",
+    "/app/test_reports/pytest/pytest_export_download.xml"
+  ],
+  "action_items": [
+    "None blocking. Both the reported bug (CSV/Excel download on web) and the sticky View Cart feature are working end-to-end.",
+    "(Housekeeping only) sync_settings for dist-1 still has last_export_at populated from testing, so a manual demo of 'New CSV' will show the 'No new orders' error until a fresh order comes in. If the user wants to demo incremental from a clean slate, main agent can reset dist-1 sync_settings.last_export_at to null or place a fresh order first."
+  ],
+  "critical_code_review_comments": [
+    "/app/frontend/app/d/sync.tsx (lines 112-149) — the web download branch now decodes base64 -> Uint8Array -> Blob -> URL.createObjectURL, creates an <a>, appends it to document.body, clicks, and cleans up with setTimeout(revokeObjectURL, 1500). This is the standard cross-browser pattern (data: URIs failed silently in Firefox/Safari and for larger payloads). Verified live: real 'download' event fires on Chromium via page.expect_download().",
+    "/app/frontend/app/search.tsx (lines 490-505) — the sticky bar is rendered outside the KeyboardAvoidingView but inside SafeAreaView with position:absolute bottom:0. paddingBottom on the ScrollView is dynamically 110 when cart.count > 0 so the last row is not obscured. testID='search-view-cart' present. Cart count/total refresh is wired in addOffer/incOffer/decOffer via refreshCart().",
+    "MINOR: /app/frontend/app/search.tsx uses ImagePicker.MediaTypeOptions.Images (line 155) which is deprecated in SDK 51+. Replace with ImagePicker.MediaType.Images. Not a blocker for this iteration but should be tracked.",
+    "MINOR: /app/frontend/app/search.tsx line 68-92 debounces on every keystroke via useEffect+setTimeout — fine, but the previous request isn't aborted, so fast typing can cause result races. Consider AbortController if the user reports flicker. Not a bug today."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_export_download.py (created — 3 pytest cases, all passing, validates base64 decodes to real csv+xlsx)"
+  ],
+  "success_rate": {
+    "backend": "100% (3/3 new export-download tests passing; iteration_8's 15/15 ERP sync tests still green)",
+    "frontend": "100% — /d/sync full-CSV and full-XLSX exports trigger real browser downloads (page.expect_download() event fires with correct suggested filenames and non-empty file bytes); /search sticky View Cart bar hides when empty, shows count+total after add, and navigates to /cart on tap"
+  },
+  "seed_data_creation": "New test data: none (test_export_download.py only READs orders and asserts the export payload). The pharmacist cart for demo@rxtech.com was cleared via POST /api/cart/clear and then had 1 unit of Dolo 650 from ABC Pharma added during test B; main agent may want to clear the cart post-testing if a clean demo state is desired.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "OTP UI login via Playwright is FLAKY on this preview host — sometimes the OTP inputs don't receive focus reliably and the Verify button click is intercepted, leaving the browser stuck on /auth/otp with 'Missing token' toasts on subsequent screens. The reliable workaround (used in this iteration) is to (a) hit /api/auth/send-otp + /api/auth/verify-otp via the `requests` library to get a real JWT, then (b) navigate the browser to /auth/email (or any app URL) and inject the token into web storage BEFORE loading a protected screen: `localStorage.setItem('@RNAsyncStorage:rxtech_token', JSON.stringify(token)); localStorage.setItem('rxtech_token', JSON.stringify(token));`. AsyncStorage on web (react-native-async-storage) falls back to localStorage under the '@RNAsyncStorage:' prefix, and the app's storage util reads `rxtech_token` directly, so setting BOTH keys is the safest approach. Then goto /d/home (or /home for pharmacist) once to let the app hydrate the token, and finally goto the target screen. To assert download events use `async with page.expect_download(timeout=15000) as dl: click(...); dl = await dl.value; await dl.save_as(path)` — this catches both anchor.click() and window.location downloads reliably.",
+  "rca_of_issue": "Reported bug: 'in distributor mode, unable to download CSV/Excel'. Root cause per main agent: previous code assigned `href = 'data:...' + base64` on an anchor that was never appended to the DOM, so `.click()` was a no-op in Firefox/Safari and truncated silently for larger data URIs in Chromium. Fix: decode base64 into a Uint8Array, wrap in a Blob with the mime from the server response, create an object URL via URL.createObjectURL, create an <a href=url download=filename>, APPEND to document.body, click, then remove + revokeObjectURL. Verified live via page.expect_download() — real download event fires and file bytes match backend base64 payload (7720 bytes for xlsx, 3654 bytes for csv)."
+}
