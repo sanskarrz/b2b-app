@@ -174,6 +174,19 @@ Fixes:
 
 ⚠️ Still outstanding: OTP is demo-only (shown in-app, never emailed) — must be replaced with a real email provider before real users onboard.
 
+## ROOT CAUSE of the production 520: I broke requirements.txt — Oct 2026
+After the pandas fix the user still got 520. **Probed the production URL directly** (`https://wireframe-to-app-1.emergent.host`) and found **EVERY** endpoint returns 520 — `/`, `/docs`, `/api/distributors`, `/api/products`, and the long-pre-existing `/api/auth/send-otp`. So the whole backend was never starting; it was never a registration or Excel bug. (Lesson: probe production endpoints FIRST before theorising.)
+
+**Root cause (self-inflicted):** during the ERP Data Sync work I ran `pip install openpyxl xlsxwriter && pip freeze > requirements.txt`, which **replaced** the curated 27-line dependency list with a **125-package hard-pinned dump of the dev image** — dev tools (black/flake8/mypy/pytest/isort), ML stack (litellm, openai, google-generativeai, huggingface_hub, tokenizers, tiktoken, grpcio, protobuf), boto3, stripe, pillow, plus odd build-heavy pins (`jq`, `librt`, `ast_serialize`, `s5cmd`, `fastuuid`, `hf-xet`). There is **no Dockerfile** — the platform installs `requirements.txt` into `expo_mongo_base_image_cloud_arm`, so an unresolvable/failing install means the container never starts → Cloudflare 520 on every route. This explains ALL the user's production symptoms since their first deploy.
+
+**Fix:** restored the original curated file from git (`8261f27:backend/requirements.txt`) and applied only the real deltas — removed `pandas`/`numpy` (no longer used after the openpyxl refactor), added `httpx`, `openpyxl`, `xlsxwriter`. Diff vs known-good is now 4 insertions / 3 deletions. Audited every third-party import in `backend/*.py` against the file: all covered. Also downgraded the harmless "index already exists" startup log from WARNING to INFO.
+
+**Verified locally:** backend starts clean (RSS 26 MB), `/api/distributors` 200, registration 200, distributor dashboard 200, xlsx import 2,365 products, pharmacist dashboard 200, 50 products.
+
+**NEVER AGAIN:** do not run `pip freeze > requirements.txt`. Append only the specific package the app needs, keeping the curated loose ranges.
+
+**Free check for the user after deploying** (no APK rebuild needed — this is a server-side fix): open `https://wireframe-to-app-1.emergent.host/api/distributors` in a browser. JSON ⇒ backend is up. 520 ⇒ still failing, and only Emergent support can read the deploy build log.
+
 ## Fixes — Aug 2026
 - **Sticky "View Cart" bar on `/search`** (`app/search.tsx`): after adding a medicine from search results, a bottom bar shows item count + total with a **View Cart** button → `/cart`, so users can check out without navigating back. Hidden when cart is empty; list bottom padding bumps to 110 so results aren't covered.
 - **BUG: Data Sync export wouldn't download on web** (`app/d/sync.tsx`). Root cause: the code built a `data:` URI and called `.click()` on an anchor that was **never appended to the DOM** (blocked by Firefox/Safari; large base64 also truncates in data URIs). Fixed with **Blob + `URL.createObjectURL`** and an anchor appended to `document.body`, then revoked. Native path unchanged (FileSystem + expo-sharing, now with UTI + graceful fallback). Verified via real browser `download` events (iteration_9): CSV 3654 B, XLSX 7720 B.

@@ -352,7 +352,8 @@ async def ensure_sync_indexes():
         try:
             await db[coll].create_index([("distributor_id", 1), ("dedupe_key", 1)])
         except Exception as e:
-            logger.warning(f"[sync] index on {coll} skipped: {e}")
+            # An equivalent index already existing is a success condition, not a problem.
+            logger.info(f"[sync] index on {coll} already present/skipped ({type(e).__name__})")
     try:
         await db.sync_logs.create_index([("distributor_id", 1), ("at", -1)])
     except Exception:
