@@ -51,8 +51,20 @@ export default function DataSync() {
   };
 
   const importFile = async () => {
+    let DocumentPicker: any = null;
     try {
-      const DocumentPicker = await import("expo-document-picker");
+      DocumentPicker = await import("expo-document-picker");
+    } catch {
+      DocumentPicker = null;
+    }
+    if (!DocumentPicker?.getDocumentAsync) {
+      showError(
+        "File picker isn't available in this build. Use the Google Drive link option below instead, or generate a fresh app build.",
+        "Can't open files"
+      );
+      return;
+    }
+    try {
       const res = await DocumentPicker.getDocumentAsync({
         type: ["text/csv", "text/comma-separated-values", "application/vnd.ms-excel",
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "*/*"],

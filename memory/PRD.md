@@ -152,6 +152,15 @@ Endpoints: `POST /api/distributor/me/sync/import`, `GET /sync/data`, `POST /sync
 
 **Testing:** iteration_10 — 20/20 backend pytest (`tests/test_portal_register.py`) + frontend E2E all pass. Sample real report kept at `tests/sample_nn_stock_report.xlsx`.
 
+## Build-gap hardening — Oct 2026
+User reported "neither registering nor importing from excel" **on their new Android/iOS build**. Verified the preview is correct end-to-end (UI registration → OTP → `/d/home`; Excel import 2,365 products), so the cause is their **deployed backend/build predating these changes**: `/auth/register` is a brand-new endpoint (needs a backend redeploy) and `expo-document-picker` is a brand-new native module (needs a fresh build). Correct order: **Publish → Deploy → then generate builds.**
+
+Two hardening fixes so it works even on an older build:
+1. **Google Sheets links now import.** `_download_drive()` tries `docs.google.com/spreadsheets/d/<id>/export?format=xlsx` for `/spreadsheets/` URLs and `drive.usercontent.../download` for file URLs, falling back to the other, and returns a clear 400 (never a 500) for private/invalid links. The user's real Sheets link imports 2,365 products in ~1.2s — **this path needs no native file picker**, so it works in any build.
+2. **File-picker fallback.** `app/d/sync.tsx` `importFile()` guards `await import("expo-document-picker")` and, if unavailable, tells the user to use the Drive link option or generate a fresh build instead of failing silently.
+
+**Testing:** iteration_11 — 10/10 backend pytest (`tests/test_hardening_fixes.py`) + registration and Data Sync frontend regressions all pass.
+
 ## Fixes — Aug 2026
 - **Sticky "View Cart" bar on `/search`** (`app/search.tsx`): after adding a medicine from search results, a bottom bar shows item count + total with a **View Cart** button → `/cart`, so users can check out without navigating back. Hidden when cart is empty; list bottom padding bumps to 110 so results aren't covered.
 - **BUG: Data Sync export wouldn't download on web** (`app/d/sync.tsx`). Root cause: the code built a `data:` URI and called `.click()` on an anchor that was **never appended to the DOM** (blocked by Firefox/Safari; large base64 also truncates in data URIs). Fixed with **Blob + `URL.createObjectURL`** and an anchor appended to `document.body`, then revoked. Native path unchanged (FileSystem + expo-sharing, now with UTI + graceful fallback). Verified via real browser `download` events (iteration_9): CSV 3654 B, XLSX 7720 B.

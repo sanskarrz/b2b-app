@@ -379,26 +379,41 @@ def _drive_id(url: str) -> Optional[str]:
 
 
 async def _download_drive(url: str) -> Tuple[bytes, str]:
-    fid = _drive_id(url.strip())
+    url = (url or "").strip()
+    fid = _drive_id(url)
     if not fid:
         raise HTTPException(400, "That doesn't look like a valid Google Drive link.")
-    dl = f"https://drive.usercontent.google.com/download?id={fid}&export=download&confirm=t"
-    async with httpx.AsyncClient(timeout=90, follow_redirects=True) as cx:
-        r = await cx.get(dl)
-        if r.status_code != 200:
-            raise HTTPException(400, "Could not download the file from Google Drive.")
-        content = r.content
-        if content[:15].lstrip().lower().startswith(b"<!doctype html") or content[:6].lower() == b"<html>":
-            raise HTTPException(
-                400,
-                "This Drive file isn't publicly accessible. Set sharing to 'Anyone with the link' and try again.",
-            )
-        fn = ""
-        cd = r.headers.get("content-disposition", "")
-        m = re.search(r'filename="?([^"]+)"?', cd)
-        if m:
-            fn = m.group(1)
-    return content, fn
+    # Native Google Sheets must be exported via the spreadsheets endpoint; plain
+    # Drive uploads come from usercontent. Try the most likely one first.
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{fid}/export?format=xlsx"
+    file_url = f"https://drive.usercontent.google.com/download?id={fid}&export=download&confirm=t"
+    candidates = [sheet_url, file_url] if "/spreadsheets/" in url else [file_url, sheet_url]
+
+    last_err = "Could not download the file from Google Drive."
+    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as cx:
+        for dl in candidates:
+            try:
+                r = await cx.get(dl)
+            except Exception as e:
+                last_err = f"Could not reach Google Drive ({type(e).__name__})."
+                continue
+            if r.status_code != 200:
+                last_err = "This Drive file isn't publicly accessible. Set sharing to 'Anyone with the link' and try again."
+                continue
+            content = r.content
+            head = content[:200].lstrip().lower()
+            if head.startswith(b"<!doctype html") or head.startswith(b"<html"):
+                last_err = ("This Drive file isn't publicly accessible. Open it in Drive → Share → "
+                            "General access → 'Anyone with the link', then try again.")
+                continue
+            fn = ""
+            m = re.search(r'filename="?([^"]+)"?', r.headers.get("content-disposition", ""))
+            if m:
+                fn = m.group(1)
+            if not fn:
+                fn = "drive-export.xlsx" if dl == sheet_url else "drive-file"
+            return content, fn
+    raise HTTPException(400, last_err)
 
 
 # ============================================================
