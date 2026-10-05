@@ -47,7 +47,9 @@ export default function DataSync() {
     (["product", "party", "ledger"] as const).forEach((k) => {
       const x = s[k]; if (x && x.found) parts.push(`${x.found} ${k}s (${x.inserted} new, ${x.updated} updated)`);
     });
-    showSuccess(parts.length ? `Imported ${parts.join(", ")}` : `Processed ${r.total_rows} rows`, "Import complete");
+    const stock = (r.stock_updated || 0) + (r.stock_created || 0);
+    if (stock) parts.push(`Stock updated for ${stock} items (${r.stock_created || 0} new)`);
+    showSuccess(parts.length ? `Imported ${parts.join(" · ")}` : `Processed ${r.total_rows} rows`, "Import complete");
   };
 
   const importFile = async () => {
@@ -118,6 +120,14 @@ export default function DataSync() {
     try {
       await api("/distributor/me/sync/settings", { method: "PATCH", body: { auto_sync: v, drive_url: driveUrl.trim() || undefined } });
       showSuccess(v ? "Auto-sync ON — we'll re-fetch daily" : "Auto-sync OFF");
+    } catch (e: any) { showError(e?.message || "Could not update", "Failed"); load(); }
+  };
+
+  const toggleStock = async (v: boolean) => {
+    setSettings((s: any) => ({ ...s, sync_to_stock: v }));
+    try {
+      await api("/distributor/me/sync/settings", { method: "PATCH", body: { sync_to_stock: v } });
+      showSuccess(v ? "Imports will update your Stock" : "Imports won't touch your Stock");
     } catch (e: any) { showError(e?.message || "Could not update", "Failed"); load(); }
   };
 
@@ -222,6 +232,14 @@ export default function DataSync() {
             <TouchableOpacity style={[styles.darkBtn, { flex: 2 }, busy === "drive" && { opacity: 0.6 }]} onPress={importDrive} disabled={!!busy} testID="import-drive">
               {busy === "drive" ? <ActivityIndicator color="#FFF" /> : <><Ionicons name="logo-google" size={15} color="#FFF" /><Text style={styles.darkBtnText}>Fetch & Import</Text></>}
             </TouchableOpacity>
+          </View>
+
+          <View style={styles.autoRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.autoTitle}>Update my Stock from imports</Text>
+              <Text style={styles.autoSub}>Push imported items, rates & quantities into your Stock screen and the pharmacy marketplace.</Text>
+            </View>
+            <Switch value={settings.sync_to_stock !== false} onValueChange={toggleStock} trackColor={{ true: colors.primary }} testID="sync-stock-toggle" />
           </View>
 
           <View style={styles.autoRow}>

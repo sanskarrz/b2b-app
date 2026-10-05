@@ -344,6 +344,128 @@ async def _upsert(typ: str, records: List[dict]) -> Tuple[int, int]:
     return ins, upd
 
 
+def _margin(mrp: float, ptr: float) -> float:
+    if mrp and ptr and mrp > 0:
+        return round((mrp - ptr) / mrp * 100, 1)
+    return 0.0
+
+
+async def push_to_stock(did: str, records: List[dict]) -> dict:
+    """Mirror the imported item master into the live catalog (`products.prices[]`)
+    so the distributor's Stock screen — and the pharmacy marketplace — reflect the
+    real stock and rates from their billing software.
+
+    Matching order: barcode → name+pack → name. Unmatched items are created so the
+    distributor's full catalogue becomes orderable.
+    """
+    from pymongo import UpdateOne, InsertOne
+
+    # Project only what matching needs — prices[] is by far the heaviest field, and
+    # `distributor_ids` already tells us whether this distributor has an entry
+    # (push_to_stock always $addToSet's the id alongside any prices[] write).
+    existing = await db.products.find(
+        {}, {"_id": 0, "id": 1, "name": 1, "pack": 1, "barcode": 1, "distributor_ids": 1}
+    ).to_list(200000)
+
+    by_barcode: Dict[str, dict] = {}
+    by_name_pack: Dict[str, dict] = {}
+    by_name: Dict[str, dict] = {}
+    for p in existing:
+        bc = str(p.get("barcode") or "").strip()
+        if bc:
+            by_barcode.setdefault(bc, p)
+        by_name_pack.setdefault(_norm(p.get("name")) + "|" + _norm(p.get("pack")), p)
+        by_name.setdefault(_norm(p.get("name")), p)
+
+    ops: list = []
+    updated = created = 0
+    new_keys = set()
+
+    for r in records:
+        name = (r.get("name") or "").strip()
+        if not name:
+            continue
+        mrp = r.get("mrp") or 0.0
+        ptr = r.get("rate") or r.get("pts") or 0.0
+        qty = int(r.get("stock") or 0)
+        bc = str(r.get("barcode") or "").strip()
+        key_np = _norm(name) + "|" + _norm(r.get("pack"))
+
+        p = (by_barcode.get(bc) if bc else None) or by_name_pack.get(key_np) or by_name.get(_norm(name))
+
+        if p:
+            has_entry = did in (p.get("distributor_ids") or [])
+            if has_entry:
+                sets = {
+                    "prices.$[e].qty_available": qty,
+                    "prices.$[e].margin_pct": _margin(mrp, ptr),
+                }
+                if ptr:
+                    sets["prices.$[e].ptr"] = ptr
+                if mrp:
+                    sets["prices.$[e].mrp"] = mrp
+                if r.get("expiry"):
+                    sets["prices.$[e].expiry"] = r["expiry"]
+                if r.get("gst"):
+                    sets["prices.$[e].gst_pct"] = r["gst"]
+                ops.append(UpdateOne(
+                    {"id": p["id"]},
+                    {"$set": sets, "$addToSet": {"distributor_ids": did}},
+                    array_filters=[{"e.distributor_id": did}],
+                ))
+            else:
+                ops.append(UpdateOne(
+                    {"id": p["id"]},
+                    {"$push": {"prices": {
+                        "distributor_id": did, "ptr": ptr, "mrp": mrp, "scheme": None,
+                        "margin_pct": _margin(mrp, ptr), "qty_available": qty,
+                        "dist_discount_pct": 0, "gst_pct": r.get("gst") or 0,
+                        "expiry": r.get("expiry"), "delivery_eta_hours": 24,
+                    }},
+                     "$addToSet": {"distributor_ids": did}},
+                ))
+            updated += 1
+        else:
+            if key_np in new_keys:
+                continue
+            new_keys.add(key_np)
+            ops.append(InsertOne({
+                "id": f"p-erp-{uuid.uuid4().hex[:10]}",
+                "name": name,
+                "salt": "",
+                "manufacturer": r.get("company") or "",
+                "pack": r.get("pack") or "",
+                "mrp": mrp,
+                "ptr": ptr,
+                "scheme": None,
+                "margin_pct": _margin(mrp, ptr),
+                "category": "General",
+                "distributor_ids": [did],
+                "best_distributor_id": did,
+                "stock_status": "in_stock" if qty > 20 else "low" if qty > 0 else "out_of_stock",
+                "image_emoji": "💊",
+                "barcode": bc or None,
+                "prices": [{
+                    "distributor_id": did, "ptr": ptr, "mrp": mrp, "scheme": None,
+                    "margin_pct": _margin(mrp, ptr), "qty_available": qty,
+                    "dist_discount_pct": 0, "gst_pct": r.get("gst") or 0,
+                    "expiry": r.get("expiry"), "delivery_eta_hours": 24,
+                }],
+                "source": "erp_import",
+                "erp_code": r.get("code"),
+                "created_at": iso(now_utc()),
+            }))
+            created += 1
+
+    CHUNK = 500
+    for i in range(0, len(ops), CHUNK):
+        try:
+            await db.products.bulk_write(ops[i:i + CHUNK], ordered=False)
+        except Exception as e:
+            logger.warning(f"[sync] stock push chunk failed: {e}")
+    return {"stock_updated": updated, "stock_created": created}
+
+
 async def ensure_sync_indexes():
     """Speed up dedupe lookups. Deliberately NOT unique: de-duplication is enforced
     by the upsert filter, and a unique index would fail on collections that already
@@ -366,6 +488,9 @@ async def process_import(content: bytes, filename: str, did: str) -> dict:
                "party": {"found": 0, "inserted": 0, "updated": 0},
                "ledger": {"found": 0, "inserted": 0, "updated": 0}}
     sheets_info = []
+    stock = {"stock_updated": 0, "stock_created": 0}
+    setting = await db.sync_settings.find_one({"distributor_id": did}, {"_id": 0}) or {}
+    push_stock = setting.get("sync_to_stock", True)
     for name, grid in grids.items():
         typ, hdr, mp = _detect(grid)
         if not typ:
@@ -376,8 +501,15 @@ async def process_import(content: bytes, filename: str, did: str) -> dict:
         summary[typ]["found"] += len(records)
         summary[typ]["inserted"] += ins
         summary[typ]["updated"] += upd
-        sheets_info.append({"sheet": name, "detected": typ, "rows": len(records),
-                            "inserted": ins, "updated": upd})
+        info = {"sheet": name, "detected": typ, "rows": len(records),
+                "inserted": ins, "updated": upd}
+        # Item master → also update the live Stock / marketplace catalogue
+        if typ == "product" and push_stock and records:
+            s = await push_to_stock(did, records)
+            stock["stock_updated"] += s["stock_updated"]
+            stock["stock_created"] += s["stock_created"]
+            info.update(s)
+        sheets_info.append(info)
     total = sum(v["found"] for v in summary.values())
     if total == 0:
         raise HTTPException(
@@ -385,7 +517,7 @@ async def process_import(content: bytes, filename: str, did: str) -> dict:
             "No Item / Party / Ledger data was recognized in this file. Make sure you exported one of "
             "these masters (with a header row) to CSV/Excel from your billing software.",
         )
-    return {"summary": summary, "sheets": sheets_info, "total_rows": total}
+    return {"summary": summary, "sheets": sheets_info, "total_rows": total, **stock}
 
 
 # ============================================================
@@ -640,12 +772,14 @@ class SyncSettingsReq(BaseModel):
     drive_url: Optional[str] = None
     auto_sync: Optional[bool] = None
     interval_hours: Optional[int] = None
+    sync_to_stock: Optional[bool] = None
 
 
 def _settings_out(s: dict) -> dict:
     return {
         "drive_url": s.get("drive_url") or "",
         "auto_sync": bool(s.get("auto_sync", False)),
+        "sync_to_stock": bool(s.get("sync_to_stock", True)),
         "interval_hours": int(s.get("interval_hours", 24)),
         "last_import_at": s.get("last_import_at"),
         "last_import_file": s.get("last_import_file"),
@@ -671,6 +805,8 @@ async def patch_sync_settings(req: SyncSettingsReq, user: dict = Depends(get_cur
         upd["auto_sync"] = bool(req.auto_sync)
     if req.interval_hours is not None:
         upd["interval_hours"] = max(1, min(168, int(req.interval_hours)))
+    if req.sync_to_stock is not None:
+        upd["sync_to_stock"] = bool(req.sync_to_stock)
     await db.sync_settings.update_one({"distributor_id": d["id"]}, {"$set": upd}, upsert=True)
     s = await db.sync_settings.find_one({"distributor_id": d["id"]}, {"_id": 0}) or {}
     return _settings_out(s)

@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 13 — Stock Sync (push_to_stock) + inventory pagination + data-loss guard. 21/21 pytest tests PASS. Backend verified: (1) PRIMARY — fresh distributor import now writes to shared `products` collection; GET /api/distributor/me/inventory returns 2363 unique items with name/pack/mrp/ptr/qty_available/stock_status populated correctly (PTR←PTR column, MRP←MRP, qty_available←BSTK, verified via GLUCOSE search: 'GLUCOSE D 1KG mrp=285 ptr=266.56 qty=11 low'); (2) re-import same file by same distributor → stock_created=0, stock_updated=2367 (no dupes created); (3) second fresh distributor importing same file matches shared catalogue (stock_created=0, stock_updated=2367, both distributors see their own qty independently and A's qty unchanged by B); (4) PATCH sync/settings {sync_to_stock:false} is persisted; re-import then returns stock_created=0 AND stock_updated=0; toggling back to true restores push; (5) GET /api/distributor/me/inventory accepts skip/limit with default=200, clamped at 500; bare call returns a flat JSON list (backward compat); page sweep retrieves 2363 UNIQUE product_ids (stable sort [name,id] prevents duplicates); only=low|out|in and q= search work alongside pagination; (6) DATA-LOSS GUARD present at server.py:303 (products.delete_many({'source':{'$ne':'erp_import'}})); verified behaviourally — items survive `sudo supervisorctl restart backend`; (7) Pharmacy regression: /api/products still 200, /api/products/{id} works for erp_import products with empty salt/manufacturer, and pharmacist can GET /api/distributors/{new_did}. Frontend verified at 1280x832 as distributor (JWT in localStorage): /d/inventory renders rows (name, •pack, PTR, MRP ₹..., margin%, units) with header '200+ SKUs', All/In stock/Low/Out chips, search input functional; /d/sync shows 2,365 Items card, 'Update my Stock from imports' Switch (testID=sync-stock-toggle) rendered ON with correct subtitle, 'Last import' timestamp displayed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stock_sync.py",
+    "/app/test_reports/pytest/pytest_stock_sync.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 4266 lines — still above 700-line threshold (pre-existing).",
+    "push_to_stock() loads all products via db.products.find({}).to_list(200000) into memory for in-process matching; works today (~2.4k products) but could be split into chunked lookups once catalogue grows to tens of thousands of SKUs."
+  ],
+  "updated_files": ["/app/backend/tests/test_stock_sync.py"],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "100% (/d/inventory + /d/sync visually verified)"},
+  "seed_data_creation": "Each test class registers a fresh TEST_* distributor via /api/auth/register + verify-otp and imports /app/backend/tests/sample_nn_stock_report.xlsx. The shared products collection accumulated distributor_ids from these runs — expected behaviour of push_to_stock().",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "ERP import now mirrors items to shared `products` collection via push_to_stock() in /app/backend/sync_engine.py. Settings endpoint /api/distributor/me/sync/settings has sync_to_stock boolean (default true). Inventory endpoint accepts skip (default 0) & limit (default 200, clamped at 500) with sort [name,id] for stable pagination. seed_database only deletes rows WHERE source != 'erp_import'. Frontend tokens live in AsyncStorage web keyed as '@AsyncStorage:rxtech_token' (JSON-stringified).",
+  "rca_of_issue": "Root cause of user bug: the ERP importer wrote to the distributor-scoped `dist_products` collection (what 'My System Data' shows), but the Stock screen reads the catalogue `products` collection filtered by distributor_ids with qty inside prices[]. The two collections were never bridged. Fix: push_to_stock() upserts each imported item into products — matching by barcode → name+pack → name — and either adds a prices[] entry for the distributor (plus $addToSet distributor_ids) or creates a brand-new product with source='erp_import'. Re-import updates qty/ptr/mrp in-place without creating duplicates. Verified: 2363 unique items appear in /api/distributor/me/inventory after import; sync_to_stock=false correctly skips the push. Incidental fixes also verified: pagination removed the 1000-row cap and uses stable [name,id] sort (2363 unique across pages); seed_database now preserves erp_import rows across restarts."
+}

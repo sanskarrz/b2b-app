@@ -187,6 +187,26 @@ After the pandas fix the user still got 520. **Probed the production URL directl
 
 **Free check for the user after deploying** (no APK rebuild needed — this is a server-side fix): open `https://wireframe-to-app-1.emergent.host/api/distributors` in a browser. JSON ⇒ backend is up. 520 ⇒ still failing, and only Emergent support can read the deploy build log.
 
+## Imports now update live Stock — Oct 2026
+User: *"auto-import worked, but nothing got updated at stock, it should update the stock."* Correct — the importer only wrote to the distributor-scoped `dist_products` table (visible in "My System Data"), while the **Stock screen reads `products` filtered by `distributor_ids`, taking qty/rates from `prices[]`**. The two were never connected.
+
+**`push_to_stock(did, records)`** in `sync_engine.py` now mirrors the imported item master into the live catalogue:
+- Match order **barcode → name+pack → name**.
+- **Matched + distributor already has a `prices[]` entry** → `$set` `qty_available`, `ptr`, `mrp`, `margin_pct` (+ expiry/gst when present) via `array_filters`.
+- **Matched but no entry for this distributor** → `$push` a new `prices[]` entry and `$addToSet` the distributor onto `distributor_ids` (so two distributors share one catalogue product).
+- **Unmatched** → create a new product (`id` prefix `p-erp-`, `source: "erp_import"`, `erp_code`) so their full catalogue becomes orderable. All keys the catalog endpoints access directly (`salt`, `manufacturer`, `ptr`, `mrp`, `distributor_ids`) are always populated to avoid KeyErrors.
+- `bulk_write` in 500-op chunks. Runs automatically on every import when the new **`sync_to_stock`** setting is not false (default ON, toggle in Data Sync UI, `testID=sync-stock-toggle`). Import response/toast now reports `stock_created` / `stock_updated`.
+
+**Also fixed (found while testing):**
+- `GET /api/distributor/me/inventory` was **hard-capped at 1000** and fetched whole product docs — a distributor with 2,365 items could never see them all. Now takes `skip`/`limit` (default 200, max 500), uses a field projection, sorts on `[("name",1),("id",1)]` for **stable** paging, and filters `only=low|out|in` in Python then slices. Response is still a bare list (backward compatible). Stock screen got **infinite scroll** and shows `N+ SKUs` until the end.
+- `seed_database()` ran `products.delete_many({})` on every startup whenever the bundled catalogue was larger than the stored count — that would **wipe a distributor's imported catalogue**. Now `delete_many({"source": {"$ne": "erp_import"}})`.
+
+**Verified:** fresh distributor → import → `stock_created: 2363`; Stock screen goes 0 → 2,363 items with correct name/pack/MRP/PTR/qty/status; stock search (GLUCOSE → 16) and `only=out` (37) work; pharmacy marketplace sees the new distributor's products; re-import → `0 created / 2367 updated` (no duplicates); second distributor importing the same file matches the shared catalogue (`0 created / 2367 updated`); paging all 2,363 rows yields 2,363 unique ids; `sync_to_stock=false` correctly skips the push.
+
+**Testing:** iteration_13 — 21/21 backend pytest (`tests/test_stock_sync.py`) + frontend Stock/Data-Sync screens verified.
+
+**Memory follow-up (post-review):** `push_to_stock` preloaded the whole catalogue *including* `prices[]`, by far the heaviest field — the exact class of memory pressure that caused the production 520. Now projects only `{id, name, pack, barcode, distributor_ids}` and determines "does this distributor already have a price entry" from `distributor_ids` (safe, because every `prices[]` write also `$addToSet`s the id). Re-verified after the change: A import 2367 updated, B shares catalogue, A re-import creates no duplicate price entries (2,363 unique SKUs), backend RSS steady at **26 MB**.
+
 ## Fixes — Aug 2026
 - **Sticky "View Cart" bar on `/search`** (`app/search.tsx`): after adding a medicine from search results, a bottom bar shows item count + total with a **View Cart** button → `/cart`, so users can check out without navigating back. Hidden when cart is empty; list bottom padding bumps to 110 so results aren't covered.
 - **BUG: Data Sync export wouldn't download on web** (`app/d/sync.tsx`). Root cause: the code built a `data:` URI and called `.click()` on an anchor that was **never appended to the DOM** (blocked by Firefox/Safari; large base64 also truncates in data URIs). Fixed with **Blob + `URL.createObjectURL`** and an anchor appended to `document.body`, then revoked. Native path unchanged (FileSystem + expo-sharing, now with UTI + graceful fallback). Verified via real browser `download` events (iteration_9): CSV 3654 B, XLSX 7720 B.

@@ -299,7 +299,8 @@ async def seed_database():
     # Refresh products: if catalog is significantly larger than existing, re-seed
     current = await db.products.count_documents({})
     if current < target_product_count:
-        await db.products.delete_many({})
+        # Never delete catalogue rows a distributor imported from their own ERP.
+        await db.products.delete_many({"source": {"$ne": "erp_import"}})
         big_catalog = build_products()
         await db.products.insert_many([{**p} for p in big_catalog])
         logger.info(f"Catalog refreshed: {current} → {len(big_catalog)} products")
@@ -3053,6 +3054,8 @@ async def distributor_order_action(
 async def distributor_inventory(
     q: Optional[str] = None,
     only: Optional[str] = None,  # 'low' | 'out' | 'in'
+    skip: int = 0,
+    limit: int = 200,
     user: dict = Depends(get_current_user),
 ):
     d = await get_owned_distributor(user)
@@ -3063,7 +3066,16 @@ async def distributor_inventory(
             {"salt": {"$regex": q, "$options": "i"}},
             {"manufacturer": {"$regex": q, "$options": "i"}},
         ]
-    products = await db.products.find(query, {"_id": 0}).to_list(1000)
+    skip = max(0, skip)
+    limit = min(500, max(1, limit))
+    proj = {"_id": 0, "id": 1, "name": 1, "salt": 1, "manufacturer": 1, "pack": 1,
+            "image_emoji": 1, "mrp": 1, "ptr": 1, "barcode": 1, "prices": 1}
+    cur = db.products.find(query, proj).sort([("name", 1), ("id", 1)])
+    if only:
+        # qty lives inside prices[] for this distributor, so filter in Python then slice
+        products = await cur.to_list(20000)
+    else:
+        products = await cur.skip(skip).limit(limit).to_list(limit)
     items = []
     for p in products:
         my_price = next((pr for pr in (p.get("prices") or []) if pr["distributor_id"] == d["id"]), None)
@@ -3093,6 +3105,8 @@ async def distributor_inventory(
             "dist_discount_pct": my_price.get("dist_discount_pct", 0),
             "gst_pct": my_price.get("gst_pct", 12.0),
         })
+    if only:
+        items = items[skip:skip + limit]
     return items
 
 

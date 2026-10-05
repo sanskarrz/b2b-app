@@ -29,20 +29,39 @@ export default function DistributorInventory() {
   const [adjBusy, setAdjBusy] = useState(false);
   const [barcodeBusy, setBarcodeBusy] = useState(false);
 
+  const PAGE = 200;
+  const [more, setMore] = useState(false);
+  const [atEnd, setAtEnd] = useState(false);
+
+  const fetchPage = useCallback(async (skip: number) => {
+    const qs = new URLSearchParams();
+    if (query) qs.set("q", query);
+    if (only) qs.set("only", only);
+    qs.set("skip", String(skip));
+    qs.set("limit", String(PAGE));
+    const d = await api(`/distributor/me/inventory?${qs.toString()}`);
+    const rows = Array.isArray(d) ? d : [];
+    setAtEnd(rows.length < PAGE);
+    setItems((prev) => (skip === 0 ? rows : [...prev, ...rows]));
+  }, [query, only]);
+
   const load = useCallback(async () => {
     setLoading(true);
+    setAtEnd(false);
     try {
-      const qs = new URLSearchParams();
-      if (query) qs.set("q", query);
-      if (only) qs.set("only", only);
-      const d = await api(`/distributor/me/inventory?${qs.toString()}`);
-      setItems(d);
+      await fetchPage(0);
     } catch (e: any) {
       showError(e?.message || "Could not load inventory", "Load failed");
     } finally {
       setLoading(false);
     }
-  }, [query, only]);
+  }, [fetchPage]);
+
+  const loadMore = async () => {
+    if (more || loading || atEnd) return;
+    setMore(true);
+    try { await fetchPage(items.length); } catch { /* keep what we have */ } finally { setMore(false); }
+  };
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -122,7 +141,7 @@ export default function DistributorInventory() {
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Inventory</Text>
-          <Text style={styles.sub}>{items.length} SKUs</Text>
+          <Text style={styles.sub}>{items.length}{atEnd ? "" : "+"} SKUs</Text>
         </View>
         <TouchableOpacity style={[styles.barcodeBtn, barcodeBusy && { opacity: 0.5 }]} onPress={autoBarcode} disabled={barcodeBusy} testID="auto-barcode-btn">
           {barcodeBusy ? <ActivityIndicator color={colors.primary} size="small" /> : <><Ionicons name="barcode-outline" size={16} color={colors.primary} /><Text style={styles.barcodeBtnText}>Auto barcodes</Text></>}
@@ -153,6 +172,9 @@ export default function DistributorInventory() {
         <FlatList
           data={items}
           keyExtractor={(p) => p.product_id}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={more ? <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} /> : null}
           renderItem={({ item: p }: any) => {
             const statusColor = p.stock_status === "out" ? colors.danger : p.stock_status === "low" ? colors.warning : colors.success;
             return (
