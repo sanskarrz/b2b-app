@@ -1,8 +1,9 @@
 // Distributor tabs layout — 5 sections for the distributor-side app.
 // On desktop web (>= 900px) a persistent left sidebar replaces the bottom tabs.
-import { Tabs, useRouter } from "expo-router";
+import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { TouchableOpacity, View, StyleSheet, Text } from "react-native";
+import { View, StyleSheet, Text } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "@/src/theme";
 import { WebShell, useIsWideWeb, NavSection } from "@/src/components/WebSidebar";
 
@@ -35,6 +36,7 @@ const NAV: NavSection[] = [
       { label: "Team Chat", icon: "chatbubbles", route: "/d/staff-chat" },
       { label: "Auto Bills", icon: "document-text", route: "/d/bills" },
       { label: "Data Sync", icon: "sync", route: "/d/sync" },
+      { label: "My System Data", icon: "server", route: "/d/sync-data" },
       { label: "Order Settings", icon: "options", route: "/d/settings" },
     ],
   },
@@ -46,6 +48,7 @@ const NAV: NavSection[] = [
 
 export default function DLayout() {
   const wide = useIsWideWeb();
+  const insets = useSafeAreaInsets();
 
   const screens = [
     <Tabs.Screen key="home" name="home" options={{ tabBarIcon: ({ focused }) => <Tab name="Home" icon="home" focused={focused} /> }} />,
@@ -64,6 +67,7 @@ export default function DLayout() {
     <Tabs.Screen key="queries" name="queries" options={{ href: null }} />,
     <Tabs.Screen key="bills" name="bills" options={{ href: null }} />,
     <Tabs.Screen key="sync" name="sync" options={{ href: null }} />,
+    <Tabs.Screen key="syncdata" name="sync-data" options={{ href: null }} />,
     <Tabs.Screen key="sci" name="staff-chat/index" options={{ href: null }} />,
     <Tabs.Screen key="scd" name="staff-chat/[id]" options={{ href: null }} />,
   ];
@@ -72,7 +76,7 @@ export default function DLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: wide ? { display: "none" } : { height: 64, paddingTop: 6, paddingBottom: 10, borderTopColor: colors.border },
+        tabBarStyle: wide ? { display: "none" } : { height: 64 + insets.bottom, paddingTop: 6, paddingBottom: 10 + insets.bottom, borderTopColor: colors.border },
         tabBarShowLabel: false,
       }}
     >

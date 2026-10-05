@@ -1,6 +1,7 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { View, Text, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "@/src/theme";
 import { WebShell, useIsWideWeb, NavSection } from "@/src/components/WebSidebar";
 
@@ -25,6 +26,7 @@ const NAV: NavSection[] = [
 
 export default function FieldLayout() {
   const wide = useIsWideWeb();
+  const insets = useSafeAreaInsets();
   const screens = [
     <Tabs.Screen key="home" name="home" options={{ tabBarIcon: ({ focused }) => <Tab name="Pipeline" icon="funnel" focused={focused} /> }} />,
     <Tabs.Screen key="chat" name="chat" options={{ tabBarIcon: ({ focused }) => <Tab name="Chat" icon="chatbubbles" focused={focused} /> }} />,
@@ -32,7 +34,7 @@ export default function FieldLayout() {
     <Tabs.Screen key="on" name="order-new" options={{ href: null }} />,
   ];
   const tabs = (
-    <Tabs screenOptions={{ headerShown: false, tabBarShowLabel: false, tabBarStyle: wide ? { display: "none" } : styles.bar }}>
+    <Tabs screenOptions={{ headerShown: false, tabBarShowLabel: false, tabBarStyle: wide ? { display: "none" } : [styles.bar, { height: 64 + insets.bottom, paddingBottom: insets.bottom }] }}>
       {screens}
     </Tabs>
   );

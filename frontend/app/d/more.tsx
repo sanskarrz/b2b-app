@@ -78,7 +78,7 @@ export default function DistributorMore() {
 
   const signOut = async () => {
     await clearToken();
-    router.replace("/auth/email");
+    router.replace("/auth/choose");
   };
 
   return (
@@ -124,6 +124,11 @@ export default function DistributorMore() {
           <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/sync")} testID="nav-sync">
             <Ionicons name="sync-outline" size={20} color={colors.text} />
             <Text style={styles.itemText}>Data Sync (Import / Export)</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/sync-data")} testID="nav-sync-data">
+            <Ionicons name="server-outline" size={20} color={colors.text} />
+            <Text style={styles.itemText}>My System Data (Items / Parties)</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.itemRow} onPress={() => router.push("/d/settings")} testID="nav-order-settings">

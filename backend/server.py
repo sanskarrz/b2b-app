@@ -126,6 +126,20 @@ class SendOTPRequest(BaseModel):
 class VerifyOTPRequest(BaseModel):
     email: EmailStr
     otp: str
+    portal: Optional[str] = None
+
+
+class RegisterRequest(BaseModel):
+    account_type: str                      # "pharmacy" | "distributor"
+    name: str
+    email: EmailStr
+    phone: str
+    business_name: str                     # shop name (pharmacy) / firm name (distributor)
+    gst: Optional[str] = None
+    drug_license: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    area: Optional[str] = None
 
 
 class OnboardRequest(BaseModel):
@@ -427,6 +441,7 @@ async def verify_otp(payload: VerifyOTPRequest):
 
     # Get or create user
     user = await db.users.find_one({"email": email}, {"_id": 0})
+    check_portal(user, payload.portal)
     if not user:
         user = {
             "id": str(uuid.uuid4()),
@@ -458,11 +473,29 @@ async def verify_otp(payload: VerifyOTPRequest):
 
 class LoginMethodRequest(BaseModel):
     email: EmailStr
+    portal: Optional[str] = None  # "pharmacy" | "distributor"
+
+
+# Which roles belong to which login portal
+PHARMACY_ROLES = {None, "", "pharmacist"}
+DISTRIBUTOR_ROLES = {"owner", "manager", "field_sales", "delivery"}
+
+
+def check_portal(user: Optional[dict], portal: Optional[str]):
+    """Keep the two login portals separate (pharmacy vs distributor)."""
+    if not portal or not user:
+        return
+    role = user.get("role")
+    if portal == "pharmacy" and role in DISTRIBUTOR_ROLES:
+        raise HTTPException(403, "This is a distributor account. Please use Distributor Login.")
+    if portal == "distributor" and role in PHARMACY_ROLES:
+        raise HTTPException(403, "This is a pharmacy account. Please use Pharmacy Login.")
 
 
 class PasswordLoginRequest(BaseModel):
     email: EmailStr
     password: str
+    portal: Optional[str] = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -475,8 +508,11 @@ async def login_method(payload: LoginMethodRequest):
     """Tell the client whether this email logs in via password (staff) or OTP."""
     email = payload.email.lower().strip()
     user = await db.users.find_one({"email": email}, {"_id": 0})
+    check_portal(user, payload.portal)
     if user and user.get("password_hash") and (user.get("role") in STAFF_PASSWORD_ROLES):
         return {"method": "password", "exists": True, "name": user.get("name"), "role": user.get("role")}
+    if payload.portal and not user:
+        raise HTTPException(404, "No account found with this email. Please register first.")
     return {"method": "otp", "exists": bool(user)}
 
 
@@ -489,12 +525,97 @@ async def password_login(payload: PasswordLoginRequest):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     if not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
+    check_portal(user, payload.portal)
     token = create_token(user["id"])
     user.pop("password_hash", None)
     return {
         "success": True, "token": token, "user": user, "onboarded": True,
         "role": user.get("role"), "must_change_password": user.get("must_change_password", False),
     }
+
+
+@api_router.post("/auth/register")
+async def register(payload: RegisterRequest):
+    """Self-registration for a new Pharmacy or Distributor. Goes live immediately.
+    Afterwards the user logs in with an email OTP."""
+    acct = (payload.account_type or "").lower().strip()
+    if acct not in ("pharmacy", "distributor"):
+        raise HTTPException(400, "account_type must be 'pharmacy' or 'distributor'")
+    email = payload.email.lower().strip()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(400, "An account with this email already exists. Please log in instead.")
+
+    name = payload.name.strip()
+    business = payload.business_name.strip()
+    if not name or not business:
+        raise HTTPException(400, "Name and business name are required")
+
+    uid = str(uuid.uuid4())
+    user = {
+        "id": uid,
+        "email": email,
+        "name": name,
+        "phone": payload.phone.strip(),
+        "shop_name": business,
+        "gst": (payload.gst or "").strip() or None,
+        "address": (payload.address or "").strip() or None,
+        "city": (payload.city or "").strip() or None,
+        "area": (payload.area or "").strip() or None,
+        "drug_license": (payload.drug_license or "").strip() or None,
+        "food_license": None,
+        "onboarded": True,
+        "created_at": iso(now_utc()),
+    }
+
+    if acct == "distributor":
+        did = f"dist-{uuid.uuid4().hex[:8]}"
+        short = business if len(business) <= 18 else business[:17].rstrip() + "."
+        await db.distributors.insert_one({
+            "id": did,
+            "name": business,
+            "short_name": short,
+            "rating": 0,
+            "delivery_time": "Next day",
+            "min_order": 0,
+            "location": user["city"] or "—",
+            "state_code": (user["gst"] or "  ")[:2] if user["gst"] else "",
+            "gst": user["gst"],
+            "drug_license": user["drug_license"],
+            "contact_email": email,
+            "contact_phone": user["phone"],
+            "address": user["address"],
+            "categories": [],
+            "discount_label": None,
+            "credit_limit": 0,
+            "credit_used": 0,
+            "credit_days": 30,
+            "settlement_discount_pct": 0,
+            "active": True,
+            "created_at": iso(now_utc()),
+        })
+        user["role"] = "owner"
+        user["owned_distributor_id"] = did
+    else:
+        user["role"] = "pharmacist"
+
+    await db.users.insert_one({**user})
+
+    # Issue an OTP straight away so they can log in without re-typing their email
+    otp = "".join(random.choices(string.digits, k=6))
+    await db.otps.update_one(
+        {"email": email},
+        {"$set": {"email": email, "otp": otp,
+                  "expires_at": iso(now_utc() + timedelta(minutes=OTP_TTL_MINUTES)), "attempts": 0}},
+        upsert=True,
+    )
+    logger.info(f"[REGISTER/{acct}] {email} → OTP {otp}")
+    resp = {"success": True, "account_type": acct, "email": email,
+            "role": user["role"], "message": "Registered. Verify the OTP sent to your email to continue."}
+    if acct == "distributor":
+        resp["distributor_id"] = user["owned_distributor_id"]
+    if DEV_RETURN_OTP:
+        resp["dev_otp"] = otp
+    return resp
 
 
 @api_router.post("/auth/change-password")
@@ -2774,28 +2895,6 @@ async def require_owner_distributor(user: dict) -> dict:
     return d
 
 
-@api_router.post("/distributor/switch-role")
-async def switch_role(payload: dict = Body(...), user: dict = Depends(get_current_user)):
-    """Demo helper: ensures the current user has the distributor role and is linked
-    to a distributor (defaults to dist-1 if none)."""
-    target = payload.get("role")
-    if target not in ("pharmacist", "distributor"):
-        raise HTTPException(400, "Invalid role")
-    upd = {}
-    if target == "distributor":
-        # Ensure user has distributor role and is linked to a distributor
-        u = await db.users.find_one({"id": user["id"]}, {"_id": 0}) or {}
-        roles = set(u.get("roles") or ["pharmacist"])
-        roles.add("distributor")
-        upd["roles"] = list(roles)
-        if not u.get("owned_distributor_id"):
-            # link to dist-1 for demo
-            upd["owned_distributor_id"] = "dist-1"
-    await db.users.update_one({"id": user["id"]}, {"$set": upd}) if upd else None
-    fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0})
-    return {"active_role": target, "user": fresh}
-
-
 @api_router.get("/distributor/me")
 async def distributor_me(user: dict = Depends(get_current_user)):
     d = await get_owned_distributor(user)
@@ -4116,7 +4215,7 @@ from client_features import feature_router  # noqa: E402
 app.include_router(feature_router)
 
 # ERP data-sync (import/export) endpoints
-from sync_engine import sync_router, auto_sync_loop  # noqa: E402
+from sync_engine import sync_router, auto_sync_loop, ensure_sync_indexes  # noqa: E402
 app.include_router(sync_router)
 
 app.add_middleware(
@@ -4134,6 +4233,7 @@ async def startup():
     await seed_distributor_demo()
     await seed_team_demo()
     import asyncio
+    await ensure_sync_indexes()
     asyncio.create_task(auto_sync_loop())
 
 

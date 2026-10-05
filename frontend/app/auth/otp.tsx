@@ -19,7 +19,7 @@ import { colors } from "@/src/theme";
 
 export default function OtpScreen() {
   const router = useRouter();
-  const { email, devOtp } = useLocalSearchParams<{ email: string; devOtp?: string }>();
+  const { email, devOtp, portal } = useLocalSearchParams<{ email: string; devOtp?: string; portal?: string }>();
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
   const [resendIn, setResendIn] = useState(30);
@@ -74,7 +74,7 @@ export default function OtpScreen() {
     try {
       const res: any = await api("/auth/verify-otp", {
         method: "POST",
-        body: { email, otp: code },
+        body: { email, otp: code, portal: portal || undefined },
         auth: false,
       });
       await setToken(res.token);

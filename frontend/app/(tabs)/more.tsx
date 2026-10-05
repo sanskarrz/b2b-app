@@ -41,31 +41,10 @@ export default function More() {
         style: "destructive",
         onPress: async () => {
           await clearToken();
-          router.replace("/auth/email");
+          router.replace("/auth/choose");
         },
       },
     ]);
-  };
-
-  const switchToDistributor = () => {
-    confirm(
-      "Switch to Distributor mode?",
-      "Manage incoming orders, inventory, customers, credit & collections. You can switch back anytime from More.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Switch",
-          onPress: async () => {
-            try {
-              await api("/distributor/switch-role", { method: "POST", body: { role: "distributor" } });
-              router.replace("/d/home");
-            } catch (e: any) {
-              Alert.alert("Failed", e?.message || "Could not switch to distributor mode");
-            }
-          },
-        },
-      ]
-    );
   };
 
   const sections: { title: string; items: ItemDef[] }[] = [
@@ -130,18 +109,6 @@ export default function More() {
             <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
           </View>
         )}
-
-        {/* Switch to Distributor mode */}
-        <TouchableOpacity style={styles.banner} onPress={switchToDistributor} testID="switch-distributor">
-          <View style={styles.bannerIcon}>
-            <Ionicons name="storefront-outline" size={18} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.bannerTitle}>Switch to Distributor mode</Text>
-            <Text style={styles.bannerSub}>Manage orders, stock, customers & collections</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-        </TouchableOpacity>
 
         {sections.map((sec, i) => (
           <View key={i} style={{ marginTop: 18 }}>

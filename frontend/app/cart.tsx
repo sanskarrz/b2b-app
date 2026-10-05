@@ -8,7 +8,7 @@ import {
   Platform,
 } from "react-native";
 import { useState, useCallback } from "react";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -23,6 +23,7 @@ type PaymentMethod = "cash" | "credit";
 
 export default function Cart() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [cart, setCart] = useState<{ items: any[]; total: number; count: number }>({
     items: [],
     total: 0,
@@ -448,7 +449,7 @@ export default function Cart() {
       </ScrollView>
 
       {/* Bottom bar — Place ALL */}
-      <View style={styles.bottomBar}>
+      <View style={[styles.bottomBar, { paddingBottom: 22 + insets.bottom }]}>
         <View style={{ flex: 1 }}>
           <Text style={styles.bbLabel}>Total ({Object.keys(byDist).length} distributor{Object.keys(byDist).length > 1 ? "s" : ""})</Text>
           <Text style={styles.bbValue}>{formatINRFull(cart.total)}</Text>

@@ -135,6 +135,23 @@ Endpoints: `POST /api/distributor/me/sync/import`, `GET /sync/data`, `POST /sync
 
 ### Older backlog
 
+## Separate Portals + Registration + Real ERP Report — Oct 2026
+**Separate login portals.** New entry screen `app/auth/choose.tsx` → **Pharmacy Login** / **Distributor Login** / **Register**. `index.tsx` and every logout now land on `/auth/choose`. The existing `auth/email → otp | login` flow is reused with a `portal` param, so there is one implementation with portal-specific branding/copy. Backend `check_portal()` + `portal` field on `/auth/login-method`, `/auth/verify-otp`, `/auth/login` enforce the split: PHARMACY_ROLES = {None, pharmacist}, DISTRIBUTOR_ROLES = {owner, manager, field_sales, delivery} → cross-portal login returns 403 "This is a pharmacy account. Please use Pharmacy Login." (and vice-versa). `login-method` with a portal also 404s unknown emails ("Please register first").
+
+**Removed the role toggle for good.** Deleted the "Switch to Distributor mode" banner/handler from `app/(tabs)/more.tsx` AND the backend `POST /distributor/switch-role` endpoint.
+
+**Self-registration.** `POST /api/auth/register` + `app/auth/register.tsx` with a Pharmacy/Distributor toggle. Goes **live instantly**. Only name, email, phone and shop/firm name are required; GST, drug licence, address, city, area optional. Distributor registration also creates a `distributors` document and sets the user `role=owner` + `owned_distributor_id`, so they appear in the marketplace and the `/d` panel works immediately. An OTP is issued by the register call so the user goes straight to the OTP screen.
+
+**Android navigation-bar overlap fixed.** All four tab bars (`(tabs)`, `d`, `field`, `delivery`) now add `useSafeAreaInsets().bottom` to height + paddingBottom, and the sticky bottom bars in `search.tsx`, `product/[id].tsx`, `cart.tsx` add the bottom inset too.
+
+**Real distributor report loads.** Studied the user's actual **"N N ENTERPRISE" Stock Detail** export (xlsx, 3 title rows, header on row 4, 2,369 rows): `PCode | Product Name | Packing | BSTK | MRP | SSTK | PTR | PTS | GP%`. Added synonyms so nothing is lost — `bstk→stock`, `sstk→stock_strip`, new `pts` and `gp_pct` fields. Added `_is_junk()` to drop report footers/total rows (the "***Computer Generated Report***" line was being imported as a product). Switched `_upsert` to **`bulk_write`** in 1,000-row chunks and added a unique index on `(distributor_id, dedupe_key)` via `ensure_sync_indexes()` at startup. Result: **2,365 products imported in 0.4s**; re-import = 0 inserted / 2,367 updated (perfect dedupe).
+
+**Data browser.** New `GET /api/distributor/me/sync/browse?type=&q=&skip=&limit=` (paginated + searchable) and screen `app/d/sync-data.tsx` ("My System Data") with Items/Parties/Ledger tabs, search and infinite scroll. Reachable from the Data Sync stat cards (now tappable), the web sidebar, and Distributor More.
+
+**Post-test fixes (iteration_10 follow-ups).** (a) `sync/browse` now sorts on `[(sort_key,1),("dedupe_key",1)]` — without a tiebreaker, duplicate product names shuffled across pages; verified paging all 2,365 rows yields 2,365 unique ids. (b) The `Field` component in `auth/register.tsx` was declared **inside** `Register`, so it was a new component type each render and the TextInput remounted on every keystroke (focus loss on native). Hoisted it to module scope with explicit `value`/`onChangeText` props; verified by typing "Ramesh Kumar" in one go.
+
+**Testing:** iteration_10 — 20/20 backend pytest (`tests/test_portal_register.py`) + frontend E2E all pass. Sample real report kept at `tests/sample_nn_stock_report.xlsx`.
+
 ## Fixes — Aug 2026
 - **Sticky "View Cart" bar on `/search`** (`app/search.tsx`): after adding a medicine from search results, a bottom bar shows item count + total with a **View Cart** button → `/cart`, so users can check out without navigating back. Hidden when cart is empty; list bottom padding bumps to 110 so results aren't covered.
 - **BUG: Data Sync export wouldn't download on web** (`app/d/sync.tsx`). Root cause: the code built a `data:` URI and called `.click()` on an anchor that was **never appended to the DOM** (blocked by Firefox/Safari; large base64 also truncates in data URIs). Fixed with **Blob + `URL.createObjectURL`** and an anchor appended to `document.body`, then revoked. Native path unchanged (FileSystem + expo-sharing, now with UTI + graceful fallback). Verified via real browser `download` events (iteration_9): CSV 3654 B, XLSX 7720 B.

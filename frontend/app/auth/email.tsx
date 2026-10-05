@@ -5,9 +5,10 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  TouchableOpacity,
 } from "react-native";
 import { useState } from "react";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Button } from "@/src/components/Button";
@@ -19,6 +20,8 @@ const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function EmailEntry() {
   const router = useRouter();
+  const { portal } = useLocalSearchParams<{ portal?: string }>();
+  const isDist = portal === "distributor";
   const [email, setEmail] = useState("");
   const [touched, setTouched] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -42,11 +45,11 @@ export default function EmailEntry() {
     try {
       const lm: any = await api("/auth/login-method", {
         method: "POST",
-        body: { email: trimmed },
+        body: { email: trimmed, portal },
         auth: false,
       });
       if (lm.method === "password") {
-        router.push({ pathname: "/auth/login", params: { email: trimmed, name: lm.name || "" } });
+        router.push({ pathname: "/auth/login", params: { email: trimmed, name: lm.name || "", portal: portal || "" } });
         return;
       }
       const res: any = await api("/auth/send-otp", {
@@ -56,7 +59,7 @@ export default function EmailEntry() {
       });
       router.push({
         pathname: "/auth/otp",
-        params: { email: trimmed, devOtp: res.dev_otp || "" },
+        params: { email: trimmed, devOtp: res.dev_otp || "", portal: portal || "" },
       });
     } catch (e: any) {
       showError(e?.message || "Could not continue. Please try again.", "Sign-in failed");
@@ -72,14 +75,26 @@ export default function EmailEntry() {
         style={{ flex: 1 }}
       >
         <View style={styles.content}>
+          {portal ? (
+            <TouchableOpacity style={styles.backRow} onPress={() => router.replace("/auth/choose")} testID="email-back">
+              <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
+              <Text style={styles.backText}>Change login type</Text>
+            </TouchableOpacity>
+          ) : null}
           <View style={styles.logoBox}>
             <Text style={styles.logoR}>R</Text>
             <Text style={styles.logoX}>X</Text>
           </View>
           <Text style={styles.brand}>
-            <Text style={{ color: colors.accent }}>RX</Text> Tech
+            {portal ? (isDist ? "Distributor Login" : "Pharmacy Login") : <><Text style={{ color: colors.accent }}>RX</Text> Tech</>}
           </Text>
-          <Text style={styles.tag}>The B2B medicine marketplace built for pharmacies.</Text>
+          <Text style={styles.tag}>
+            {portal
+              ? isDist
+                ? "For distributor owners, managers, field sales & delivery staff."
+                : "Order medicines, track deliveries and manage payments."
+              : "The B2B medicine marketplace built for pharmacies."}
+          </Text>
 
           <View style={{ height: 40 }} />
 
@@ -128,6 +143,15 @@ export default function EmailEntry() {
             <Text style={styles.legalText}>
               By continuing, you agree to RX Tech&apos;s Terms & Privacy Policy.
             </Text>
+            <TouchableOpacity
+              onPress={() => router.push({ pathname: "/auth/register", params: { type: isDist ? "distributor" : "pharmacy" } })}
+              style={{ marginTop: 12 }}
+              testID="email-register-link"
+            >
+              <Text style={styles.registerLink}>
+                New {isDist ? "distributor" : "pharmacy"}? Register here
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -181,4 +205,7 @@ const styles = StyleSheet.create({
   errorText: { fontSize: 12, color: colors.danger, fontWeight: "600" },
   legal: { marginTop: 32, alignItems: "center" },
   legalText: { fontSize: 11, color: colors.textTertiary, textAlign: "center" },
+  backRow: { flexDirection: "row", alignItems: "center", gap: 2, marginBottom: 20, alignSelf: "flex-start" },
+  backText: { fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
+  registerLink: { fontSize: 13, color: colors.primary, fontWeight: "700", textAlign: "center" },
 });

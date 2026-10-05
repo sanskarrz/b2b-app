@@ -9,7 +9,7 @@ import {
   Platform,
 } from "react-native";
 import { useEffect, useState } from "react";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { TopBar } from "@/src/components/TopBar";
@@ -38,6 +38,7 @@ type Offer = {
 export default function ProductDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"compare" | "substitute" | "variant">("compare");
@@ -285,7 +286,7 @@ export default function ProductDetail() {
 
       {/* Sticky bottom add-to-cart */}
       {bestOffer && (
-        <View style={styles.stickyBar}>
+        <View style={[styles.stickyBar, { bottom: 12 + insets.bottom }]}>
           <View style={{ flex: 1 }}>
             <Text style={styles.stickyLabel}>{bestOffer.distributor_name}</Text>
             <Text style={styles.stickyPrice}>{formatINRFull(bestOffer.ptr)} <Text style={styles.stickyMrp}>MRP {formatINRFull(bestOffer.mrp)}</Text></Text>

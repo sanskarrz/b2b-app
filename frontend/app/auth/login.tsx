@@ -12,7 +12,7 @@ import { colors } from "@/src/theme";
 
 export default function StaffLogin() {
   const router = useRouter();
-  const { email, name } = useLocalSearchParams<{ email: string; name?: string }>();
+  const { email, name, portal } = useLocalSearchParams<{ email: string; name?: string; portal?: string }>();
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -23,7 +23,7 @@ export default function StaffLogin() {
     try {
       const res: any = await api("/auth/login", {
         method: "POST",
-        body: { email, password },
+        body: { email, password, portal: portal || undefined },
         auth: false,
       });
       await setToken(res.token);

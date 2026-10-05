@@ -13,7 +13,7 @@ export default function Index() {
     (async () => {
       const token = await storage.secureGet("rxtech_token", "");
       if (!token) {
-        router.replace("/auth/email");
+        router.replace("/auth/choose");
         return;
       }
       try {
@@ -21,7 +21,7 @@ export default function Index() {
         routeByRole(router, me);
       } catch (e) {
         await storage.secureRemove("rxtech_token");
-        router.replace("/auth/email");
+        router.replace("/auth/choose");
       }
     })();
   }, []);

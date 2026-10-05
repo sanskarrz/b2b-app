@@ -25,7 +25,7 @@ export function WebSidebar({ brand, subtitle, sections }: { brand: string; subti
 
   const signOut = async () => {
     await clearToken();
-    router.replace("/auth/email");
+    router.replace("/auth/choose");
   };
 
   return (

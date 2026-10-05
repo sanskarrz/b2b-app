@@ -50,7 +50,10 @@ PRODUCT_MAP: Dict[str, List[str]] = {
     "mrp": ["mrp", "maxretailprice", "mrprate"],
     "rate": ["ptr", "salerate", "saleprice", "sellingrate", "rate", "sprate", "sellrate", "price", "netrate"],
     "purchase_rate": ["purchaserate", "purrate", "prate", "costrate", "cost", "pprate", "purchase"],
-    "stock": ["closingstock", "clstock", "currentstock", "availableqty", "avlqty", "stock", "qty", "quantity", "balqty", "closingqty"],
+    "pts": ["pts", "pricetostockist", "ptsrate", "stockistrate"],
+    "gp_pct": ["gppct", "gp", "grossprofit", "marginpct", "margin", "gpper"],
+    "stock": ["closingstock", "clstock", "currentstock", "availableqty", "avlqty", "bstk", "bstock", "boxstock", "stock", "qty", "quantity", "balqty", "closingqty"],
+    "stock_strip": ["sstk", "sstock", "stripstock", "loosestock", "looseqty"],
     "batch": ["batchno", "batch"],
     "expiry": ["expdate", "expiry", "exp", "expirydate"],
     "hsn": ["hsncode", "hsn"],
@@ -207,6 +210,18 @@ def _hash(*parts) -> str:
 # ============================================================
 # Parsers -> record dicts + dedupe key
 # ============================================================
+def _is_junk(name: str) -> bool:
+    """Report footers / separators / total rows that aren't real records."""
+    low = name.lower().strip()
+    if not low:
+        return True
+    if "***" in low or "computer generated" in low or "does not require" in low:
+        return True
+    if low.startswith(("total", "grand total", "sub total", "subtotal", "----", "====", "page ")):
+        return True
+    return False
+
+
 def _parse_products(grid, hdr, mp, did) -> List[dict]:
     out = []
     for row in grid[hdr + 1:]:
@@ -215,12 +230,22 @@ def _parse_products(grid, hdr, mp, did) -> List[dict]:
         code = get("code")
         if not name and not code:
             continue
-        key = code or (_norm(name) + "|" + _norm(get("pack")))
+        if _is_junk(name or code):
+            continue
+        mrp, rate = _num(get("mrp")), _num(get("rate"))
+        pts, stock = _num(get("pts")), _num(get("stock"))
+        pack = get("pack")
+        # a real stock row always carries at least one number or a pack size
+        if mrp == 0 and rate == 0 and pts == 0 and stock == 0 and not pack:
+            continue
+        key = code or (_norm(name) + "|" + _norm(pack))
         out.append({
             "distributor_id": did, "dedupe_key": key,
             "code": code or None, "name": name or code, "company": get("company") or None,
-            "pack": get("pack") or None, "mrp": _num(get("mrp")), "rate": _num(get("rate")),
-            "purchase_rate": _num(get("purchase_rate")), "stock": _num(get("stock")),
+            "pack": pack or None, "mrp": mrp, "rate": rate,
+            "purchase_rate": _num(get("purchase_rate")), "stock": stock,
+            "stock_strip": _num(get("stock_strip")), "pts": pts,
+            "gp_pct": _num(get("gp_pct")),
             "batch": get("batch") or None, "expiry": get("expiry") or None,
             "hsn": get("hsn") or None, "gst": _num(get("gst")),
             "barcode": get("barcode") or None, "rack": get("rack") or None,
@@ -235,6 +260,8 @@ def _parse_parties(grid, hdr, mp, did) -> List[dict]:
         name = get("name")
         code = get("code")
         if not name and not code:
+            continue
+        if _is_junk(name or code):
             continue
         key = code or _norm(name)
         out.append({
@@ -257,6 +284,8 @@ def _parse_ledger(grid, hdr, mp, did) -> List[dict]:
         date = get("date")
         if not party and not voucher:
             continue
+        if _is_junk(party or voucher):
+            continue
         debit = _num(get("debit"))
         credit = _num(get("credit"))
         amount = _num(get("amount")) or (debit - credit)
@@ -274,21 +303,40 @@ PARSERS = {"product": _parse_products, "party": _parse_parties, "ledger": _parse
 
 
 async def _upsert(typ: str, records: List[dict]) -> Tuple[int, int]:
-    """Upsert on (distributor_id, dedupe_key). Returns (inserted, updated)."""
+    """Bulk upsert on (distributor_id, dedupe_key). Returns (inserted, updated)."""
+    from pymongo import UpdateOne
     coll = db[COLL[typ]]
+    stamp = iso(now_utc())
     ins = upd = 0
-    for r in records:
-        r["updated_at"] = iso(now_utc())
-        res = await coll.update_one(
-            {"distributor_id": r["distributor_id"], "dedupe_key": r["dedupe_key"]},
-            {"$set": r, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": iso(now_utc())}},
-            upsert=True,
-        )
-        if res.upserted_id is not None:
-            ins += 1
-        elif res.modified_count:
-            upd += 1
+    CHUNK = 1000
+    for start in range(0, len(records), CHUNK):
+        ops = []
+        for r in records[start:start + CHUNK]:
+            r["updated_at"] = stamp
+            ops.append(UpdateOne(
+                {"distributor_id": r["distributor_id"], "dedupe_key": r["dedupe_key"]},
+                {"$set": r, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": stamp}},
+                upsert=True,
+            ))
+        if not ops:
+            continue
+        res = await coll.bulk_write(ops, ordered=False)
+        ins += len(res.upserted_ids or {})
+        upd += res.modified_count
     return ins, upd
+
+
+async def ensure_sync_indexes():
+    """Unique dedupe index per distributor — also keeps bulk upserts fast."""
+    for coll in COLL.values():
+        try:
+            await db[coll].create_index([("distributor_id", 1), ("dedupe_key", 1)], unique=True)
+        except Exception:
+            pass
+    try:
+        await db.sync_logs.create_index([("distributor_id", 1), ("at", -1)])
+    except Exception:
+        pass
 
 
 async def process_import(content: bytes, filename: str, did: str) -> dict:
@@ -413,6 +461,31 @@ async def sync_data(user: dict = Depends(get_current_user)):
         preview = await db[coll].find({"distributor_id": d["id"]}, {"_id": 0}).sort("updated_at", -1).to_list(20)
         out[typ] = {"count": c, "preview": preview}
     return out
+
+
+@sync_router.get("/distributor/me/sync/browse")
+async def sync_browse(
+    type: str = "product", q: str = "", skip: int = 0, limit: int = 50,
+    user: dict = Depends(get_current_user),
+):
+    """Paginated, searchable view of the data imported from their billing software."""
+    d = await _dist(user)
+    if type not in COLL:
+        raise HTTPException(400, "type must be product, party or ledger")
+    query: dict = {"distributor_id": d["id"]}
+    term = (q or "").strip()
+    if term:
+        rx = {"$regex": re.escape(term), "$options": "i"}
+        fields = {"product": ["name", "code", "company", "barcode", "pack"],
+                  "party": ["name", "code", "city", "area", "phone", "gstin"],
+                  "ledger": ["party", "voucher", "type"]}[type]
+        query["$or"] = [{f: rx} for f in fields]
+    sort_key = {"product": "name", "party": "name", "ledger": "date"}[type]
+    total = await db[COLL[type]].count_documents(query)
+    rows = await db[COLL[type]].find(query, {"_id": 0}).sort(
+        [(sort_key, 1), ("dedupe_key", 1)]
+    ).skip(max(0, skip)).limit(min(200, max(1, limit))).to_list(200)
+    return {"total": total, "skip": skip, "limit": limit, "rows": rows}
 
 
 class ClearReq(BaseModel):

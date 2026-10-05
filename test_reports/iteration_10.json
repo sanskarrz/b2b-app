@@ -1,0 +1,44 @@
+{
+  "summary": "RX Tech iteration_10 — verified separate login portals, self-registration (pharmacy + distributor live-instantly), 'Switch to Distributor' banner removal, the Android nav-bar overlap safe-area fix (by code inspection — all 7 places), real N N ENTERPRISE Stock Detail import (2365 products / dedupe to 0 new on reimport), and the new /d/sync-data screen + /distributor/me/sync/browse endpoint. Backend: 20/20 pytest cases pass in /app/backend/tests/test_portal_register.py — registration (pharmacy + distributor + optional-fields + duplicate 400 + invalid account_type 400), portal separation (403s and 404 unknown-email), /distributor/switch-role deleted (returns 404), ERP import of the real 2369-row N N ENTERPRISE xlsx inserts 2365 products (4 footer rows filtered), reimport updates 2367 / inserts 0 (dedupe), field mapping present (code/name/pack/stock/stock_strip/mrp/rate/pts/gp_pct), sync/browse search for GLUCOSE returns matches, pagination works, invalid type → 400, field_sales → 403. Frontend (mobile 390x844 pharmacist + desktop 1280x832 distributor via REST+localStorage token injection): /auth/choose shows three testIDs; tapping portal-pharmacy routes to /auth/email?portal=pharmacy branded 'Pharmacy Login', portal-distributor → 'Distributor Login'; /auth/register pharmacy + distributor E2E both reach OTP screen with Dev mode banner → after token injection, distributor lands on /d/home dashboard, pharmacist lands on /home. /d/sync-data has syncdata-tab-product/party/ledger + syncdata-search; /d/sync has stat-product/stat-party/stat-ledger; /d/more exposes nav-sync-data. switch-distributor marker is GONE from both pharmacist /home and /more and from /d/more. Safe-area insets.bottom applied in all 7 required files: (tabs)/_layout.tsx L17/19, d/_layout.tsx L79, field/_layout.tsx L37, delivery/_layout.tsx L39, search.tsx L493, product/[id].tsx L289, cart.tsx L452. Deprecated packages detected: NONE. Carry-over non-blocking RN-Web warnings: shadow* props + props.pointerEvents (iteration_6+).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/distributor/me/sync/browse", "issue": "Mongo .sort('name',1) has no secondary tiebreaker, so products that share a name/pack can shuffle between pages (observed 1-row overlap between skip=0 limit=10 and skip=10 limit=10). Fix: add a stable secondary sort key, e.g. .sort([('name',1),('code',1)]). Low priority — not blocking."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "/app/frontend/app/auth/register.tsx", "issue": "The `Field` component is defined INSIDE the `Register` function (lines 61-77). On every keystroke React remounts each TextInput, which causes focus loss on real devices (less visible on web). Move `Field` outside the component or inline the <TextInput/> markup. Reference: /app/frontend/app/auth/register.tsx:61"},
+      {"component": "global (carry-over)", "issue": "Non-blocking RN Web warnings: 'shadow*' style props deprecated -> use boxShadow; 'props.pointerEvents deprecated' -> use style.pointerEvents. Already noted in iteration_6/7/8/9."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_portal_register.py",
+    "/app/test_reports/pytest/pytest_portal_register.xml"
+  ],
+  "action_items": [
+    "(Minor) Add a secondary sort key to /api/distributor/me/sync/browse so pagination is deterministic for products with identical names: in /app/backend/sync_engine.py line 485 change .sort(sort_key, 1) to .sort([(sort_key, 1), ('code', 1)]) (or use _id as tiebreaker).",
+    "(Minor) Hoist the `Field` component out of `Register` in /app/frontend/app/auth/register.tsx so TextInputs don't lose focus between keystrokes on native."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/server.py L484-492 — check_portal() correctly uses a role set to decide pharmacy vs distributor portal. PHARMACY_ROLES = {None, '', 'pharmacist'} covers both pharmacist users and newly-created OTP users (role=None) so an unknown pharmacist email can still be created. DISTRIBUTOR_ROLES = {'owner','manager','field_sales','delivery'}. login-method also returns 404 for an unknown email WITH a portal, matching the spec exactly.",
+    "/app/backend/server.py L537-618 — /auth/register is a single-call endpoint that creates the user, creates a distributors doc for account_type='distributor' (so the firm appears INSTANTLY in GET /api/distributors), seeds an OTP (returned as dev_otp when DEV_RETURN_OTP) and sets owned_distributor_id on the user. Minimal mandatory validation (name/email/phone/business_name) matches the brief.",
+    "/app/backend/sync_engine.py L425-451 — /distributor/me/sync/import filters footer rows via process_import (we confirmed 2365 inserted out of 2369 raw rows — the 4 title/footer rows are correctly skipped) and dedupes on reimport (updated=2367, inserted=0).",
+    "/app/frontend/app/(tabs)/_layout.tsx, d/_layout.tsx, field/_layout.tsx, delivery/_layout.tsx — all four tab bars add insets.bottom to BOTH height AND paddingBottom. /app/frontend/app/search.tsx (cartBar), /app/frontend/app/product/[id].tsx (stickyBar), /app/frontend/app/cart.tsx (bottomBar) — all three sticky bottom bars add insets.bottom to paddingBottom. 7/7 locations correctly wired. The Android system-nav overlap fix is applied; cannot be fully reproduced in a browser, but code is correct and no visual regression observed on web (tab bar still visible, nothing clipped at narrow viewports)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_portal_register.py (created — 20 pytest cases: registration/portal-separation/switch-role-removed/ERP-NN-import/sync-browse)"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 new tests pass in test_portal_register.py; prior test_erp_sync.py / test_export_download.py still green)",
+    "frontend": "100% (choose/email/register/OTP/distributor-dashboard/sync-data/sync/more and pharmacist home/more all render correctly; switch-distributor banner removed everywhere; safe-area insets.bottom applied in all 7 code locations)"
+  },
+  "seed_data_creation": "Backend tests create ~5 ephemeral TEST_* accounts per run (pharmacy and distributor) plus one 'NN Test Dist …' distributor into which the 2365-row N N ENTERPRISE Stock Detail is imported. No existing seed users are modified. Main agent may clean up TEST_* / 'NN Test …' / 'E2E Dist …' / 'E2E Pharm …' records when a demo-clean DB is desired.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Portal separation + registration + NN import are fully working. For Playwright on this preview host, OTP UI login via on-screen inputs is still flaky — use the REST+localStorage injection pattern: `requests.post(/api/auth/send-otp)` → `verify-otp` to get a token, then `localStorage.setItem('@RNAsyncStorage:rxtech_token', JSON.stringify(JSON.stringify(token))); localStorage.setItem('rxtech_token', JSON.stringify(JSON.stringify(token)))` (double-stringify because AsyncStorage on web expects a JSON string). Use desktop viewport 1280x832 for /d/* (sidebar at >=900px) and mobile 390x844 for pharmacist screens. The ERP import response has NESTED shape: {success, summary: {product: {found, inserted, updated}, party:{...}, ledger:{...}}, sheets:[{sheet, detected, rows, inserted, updated}], total_rows} — do NOT read flat `detected`/`inserted` keys from the top-level body.",
+  "rca_of_issue": "Not a bug this iteration — all requested features confirmed working. Only two minor code quality items reported: (1) sync/browse sort tiebreaker, (2) Field component defined inside Register causing focus loss on native."
+}

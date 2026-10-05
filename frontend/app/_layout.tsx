@@ -11,6 +11,8 @@ export default function RootLayout() {
         <StatusBar style="dark" />
         <Stack screenOptions={{ headerShown: false, animation: "fade" }}>
           <Stack.Screen name="index" />
+          <Stack.Screen name="auth/choose" />
+          <Stack.Screen name="auth/register" options={{ animation: "slide_from_right" }} />
           <Stack.Screen name="auth/email" />
           <Stack.Screen name="auth/otp" />
           <Stack.Screen name="auth/onboarding" />

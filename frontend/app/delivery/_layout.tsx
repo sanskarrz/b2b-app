@@ -1,6 +1,7 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { View, Text, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "@/src/theme";
 import { WebShell, useIsWideWeb, NavSection } from "@/src/components/WebSidebar";
 
@@ -26,6 +27,7 @@ const NAV: NavSection[] = [
 
 export default function DeliveryLayout() {
   const wide = useIsWideWeb();
+  const insets = useSafeAreaInsets();
   const screens = [
     <Tabs.Screen key="home" name="home" options={{ tabBarIcon: ({ focused }) => <Tab name="Today" icon="bicycle" focused={focused} /> }} />,
     <Tabs.Screen key="completed" name="completed" options={{ tabBarIcon: ({ focused }) => <Tab name="History" icon="checkmark-done" focused={focused} /> }} />,
@@ -34,7 +36,7 @@ export default function DeliveryLayout() {
     <Tabs.Screen key="oid" name="order/[id]" options={{ href: null }} />,
   ];
   const tabs = (
-    <Tabs screenOptions={{ headerShown: false, tabBarShowLabel: false, tabBarStyle: wide ? { display: "none" } : styles.bar }}>
+    <Tabs screenOptions={{ headerShown: false, tabBarShowLabel: false, tabBarStyle: wide ? { display: "none" } : [styles.bar, { height: 64 + insets.bottom, paddingBottom: insets.bottom }] }}>
       {screens}
     </Tabs>
   );

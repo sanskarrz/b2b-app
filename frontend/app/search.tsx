@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { api } from "@/src/api";
@@ -52,6 +52,7 @@ type Match = {
 
 export default function Search() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [q, setQ] = useState("");
   const [matches, setMatches] = useState<Match[]>([]);
   const [alternatives, setAlternatives] = useState<Match[]>([]);
@@ -489,7 +490,7 @@ export default function Search() {
 
       {/* Sticky View Cart bar — checkout directly from search */}
       {cart.count > 0 && (
-        <View style={styles.cartBar}>
+        <View style={[styles.cartBar, { paddingBottom: 14 + insets.bottom }]}>
           <View style={{ flex: 1 }}>
             <Text style={styles.cartBarCount}>
               {cart.count} item{cart.count > 1 ? "s" : ""} in cart
@@ -513,7 +514,7 @@ const styles = StyleSheet.create({
     position: "absolute", bottom: 0, left: 0, right: 0,
     flexDirection: "row", alignItems: "center", gap: 12,
     backgroundColor: "#FFF", borderTopWidth: 1, borderTopColor: colors.border,
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: Platform.OS === "ios" ? 28 : 14,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14,
   },
   cartBarCount: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
   cartBarTotal: { fontSize: 17, color: colors.text, fontWeight: "800", marginTop: 1 },

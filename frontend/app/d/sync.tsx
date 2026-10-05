@@ -181,10 +181,16 @@ export default function DataSync() {
         {/* Imported data snapshot */}
         <View style={styles.statsRow}>
           {(["product", "party", "ledger"] as const).map((k) => (
-            <View key={k} style={styles.statCard}>
-              <Text style={styles.statNum}>{counts[k]?.count ?? 0}</Text>
+            <TouchableOpacity
+              key={k}
+              style={styles.statCard}
+              onPress={() => router.push(`/d/sync-data?type=${k}`)}
+              testID={`stat-${k}`}
+            >
+              <Text style={styles.statNum}>{(counts[k]?.count ?? 0).toLocaleString("en-IN")}</Text>
               <Text style={styles.statLabel}>{k === "product" ? "Items" : k === "party" ? "Parties" : "Ledger"}</Text>
-            </View>
+              <Text style={styles.statView}>View →</Text>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -284,6 +290,7 @@ const styles = StyleSheet.create({
   statCard: { flex: 1, backgroundColor: "#FFF", borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, alignItems: "center", paddingVertical: 14 },
   statNum: { fontSize: 22, fontWeight: "800", color: colors.text },
   statLabel: { fontSize: 11, color: colors.textSecondary, marginTop: 2, fontWeight: "600" },
+  statView: { fontSize: 9.5, color: colors.primary, marginTop: 4, fontWeight: "800" },
 
   section: { marginTop: 18, paddingHorizontal: 12 },
   sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

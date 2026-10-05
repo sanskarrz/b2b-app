@@ -28,7 +28,7 @@ export function StaffProfile() {
   const logout = () => {
     confirm("Log out?", "You'll need to sign in again.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Log out", style: "destructive", onPress: async () => { await clearToken(); router.replace("/auth/email"); } },
+      { text: "Log out", style: "destructive", onPress: async () => { await clearToken(); router.replace("/auth/choose"); } },
     ]);
   };
 
