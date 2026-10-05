@@ -161,6 +161,19 @@ Two hardening fixes so it works even on an older build:
 
 **Testing:** iteration_11 — 10/10 backend pytest (`tests/test_hardening_fixes.py`) + registration and Data Sync frontend regressions all pass.
 
+## Production 520 fix — removed pandas/numpy — Oct 2026
+User's new APK showed **"Registration failed — Request failed (520)"**. The screenshot showed the *new* registration screen, so the build WAS current — my earlier "redeploy + rebuild" diagnosis was **wrong** (it cost the user a deploy/build cycle). **HTTP 520 is a Cloudflare origin error**: the app reached the production backend but the origin failed. Preview worked with identical code, so the difference is production resources.
+
+Root cause (most probable): `sync_engine.py` imported **pandas** (which pulls numpy) at module import time, and `server.py` imports `sync_engine`, so every worker paid ~200 MB+ RSS at startup — enough to be OOM-killed on a small production pod, which surfaces as a 520. Secondary risk: `startup()` **awaited** `ensure_sync_indexes()` which created a **unique** index — that fails/stalls on collections that already contain duplicates, blocking the app from ever serving.
+
+Fixes:
+1. **Removed pandas/numpy entirely.** Excel reading now uses `openpyxl` (`read_only=True, data_only=True`), CSV reading uses stdlib `csv`, XLSX writing uses `xlsxwriter` directly (`constant_memory=True`), CSV writing uses `csv.DictWriter`. Dropped `pandas`, `numpy`, `tzdata` from `requirements.txt`. Legacy `.xls` now returns a clear 400 telling the user to save as .xlsx/CSV (openpyxl can't read BIFF).
+2. **Index creation is non-blocking and non-unique.** `ensure_sync_indexes()` creates a plain (non-unique) index — dedupe is enforced by the upsert filter, not the index — and `startup()` now fires it in a background task so it can never stop the app from serving.
+
+**Verified:** `server` imports successfully with pandas/numpy **blocked via a meta_path blocker** (simulating the new prod image); backend **RSS dropped to 26 MB**; xlsx import 2,365 products in 1.2s, CSV import, Google-Sheets-link import, CSV export (24 rows) and XLSX export (valid workbook, 25×18) all pass; browse/search works.
+
+⚠️ Still outstanding: OTP is demo-only (shown in-app, never emailed) — must be replaced with a real email provider before real users onboard.
+
 ## Fixes — Aug 2026
 - **Sticky "View Cart" bar on `/search`** (`app/search.tsx`): after adding a medicine from search results, a bottom bar shows item count + total with a **View Cart** button → `/cart`, so users can check out without navigating back. Hidden when cart is empty; list bottom padding bumps to 110 so results aren't covered.
 - **BUG: Data Sync export wouldn't download on web** (`app/d/sync.tsx`). Root cause: the code built a `data:` URI and called `.click()` on an anchor that was **never appended to the DOM** (blocked by Firefox/Safari; large base64 also truncates in data URIs). Fixed with **Blob + `URL.createObjectURL`** and an anchor appended to `document.body`, then revoked. Native path unchanged (FileSystem + expo-sharing, now with UTI + graceful fallback). Verified via real browser `download` events (iteration_9): CSV 3654 B, XLSX 7720 B.

@@ -63,12 +63,10 @@ motor==3.3.1
 multidict==6.7.1
 mypy==2.1.0
 mypy_extensions==1.1.0
-numpy==2.4.5
 oauthlib==3.3.1
 openai==1.99.9
 openpyxl==3.1.5
 packaging==26.2
-pandas==3.0.3
 passlib==1.7.4
 pathspec==1.1.1
 pillow==12.2.0
@@ -116,7 +114,6 @@ tqdm==4.67.3
 typer==0.25.1
 typing-inspection==0.4.2
 typing_extensions==4.15.0
-tzdata==2026.2
 uritemplate==4.2.0
 urllib3==2.7.0
 uvicorn==0.25.0

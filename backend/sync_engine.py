@@ -18,19 +18,22 @@ OUT (RX Tech -> their system):  distributor exports the orders that pharmacies
     placed in the app, as CSV/XLSX (Full or "since last export"), and imports it
     into their billing software.
 """
+import csv as _csv
 import hashlib
 import io
+import logging
 import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import httpx
-import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from server import db, get_current_user, staff_distributor, now_utc, iso
+
+logger = logging.getLogger("rxtech.sync")
 
 sync_router = APIRouter(prefix="/api")
 
@@ -135,8 +138,15 @@ def _read_grids(content: bytes, filename: str) -> Dict[str, List[List]]:
     is_excel = fn.endswith((".xlsx", ".xls", ".xlsm")) or content[:2] == b"PK"
     grids: Dict[str, List[List]] = {}
     if is_excel:
+        if fn.endswith(".xls"):
+            raise HTTPException(
+                400,
+                "Old .xls files aren't supported. Open it in Excel and use 'Save As' → "
+                "Excel Workbook (.xlsx) or CSV, then upload that.",
+            )
         try:
-            sheets = pd.read_excel(io.BytesIO(content), sheet_name=None, header=None, dtype=str)
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
         except Exception as e:
             raise HTTPException(
                 400,
@@ -144,10 +154,18 @@ def _read_grids(content: bytes, filename: str) -> Dict[str, List[List]]:
                 "Please export Item Master / Party Master / Ledger to Excel or CSV from your billing "
                 f"software and upload that. ({type(e).__name__})",
             )
-        for name, df in sheets.items():
-            grids[str(name)] = df.fillna("").values.tolist()
+        try:
+            for name in wb.sheetnames:
+                ws = wb[name]
+                rows = []
+                for row in ws.iter_rows(values_only=True):
+                    cells = ["" if c is None else c for c in row]
+                    if any(str(c).strip() for c in cells):
+                        rows.append(cells)
+                grids[str(name)] = rows
+        finally:
+            wb.close()
     else:
-        import csv as _csv
         text = None
         for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
             try:
@@ -327,12 +345,14 @@ async def _upsert(typ: str, records: List[dict]) -> Tuple[int, int]:
 
 
 async def ensure_sync_indexes():
-    """Unique dedupe index per distributor — also keeps bulk upserts fast."""
+    """Speed up dedupe lookups. Deliberately NOT unique: de-duplication is enforced
+    by the upsert filter, and a unique index would fail on collections that already
+    contain duplicates. Never blocks or breaks startup."""
     for coll in COLL.values():
         try:
-            await db[coll].create_index([("distributor_id", 1), ("dedupe_key", 1)], unique=True)
-        except Exception:
-            pass
+            await db[coll].create_index([("distributor_id", 1), ("dedupe_key", 1)])
+        except Exception as e:
+            logger.warning(f"[sync] index on {coll} skipped: {e}")
     try:
         await db.sync_logs.create_index([("distributor_id", 1), ("at", -1)])
     except Exception:
@@ -575,18 +595,30 @@ async def sync_export(req: ExportReq, user: dict = Depends(get_current_user)):
     if not rows:
         raise HTTPException(400, "No new orders to export since your last export."
                             if req.mode == "incremental" else "No orders to export yet.")
-    df = pd.DataFrame(rows)
     import base64
+    headers = list(rows[0].keys())
     stamp = now_utc().strftime("%Y%m%d-%H%M")
     if req.format == "xlsx":
+        import xlsxwriter
         buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
-            df.to_excel(w, index=False, sheet_name="Orders")
+        wb = xlsxwriter.Workbook(buf, {"in_memory": True, "constant_memory": True})
+        ws = wb.add_worksheet("Orders")
+        bold = wb.add_format({"bold": True})
+        for c, h in enumerate(headers):
+            ws.write(0, c, h, bold)
+        for r, row in enumerate(rows, start=1):
+            for c, h in enumerate(headers):
+                ws.write(r, c, row.get(h, ""))
+        wb.close()
         data = buf.getvalue()
         filename = f"rxtech-orders-{stamp}.xlsx"
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     else:
-        data = df.to_csv(index=False).encode("utf-8-sig")
+        buf = io.StringIO()
+        w = _csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+        data = buf.getvalue().encode("utf-8-sig")
         filename = f"rxtech-orders-{stamp}.csv"
         mime = "text/csv"
     now = iso(now_utc())

@@ -4233,7 +4233,16 @@ async def startup():
     await seed_distributor_demo()
     await seed_team_demo()
     import asyncio
-    await ensure_sync_indexes()
+
+    async def _bg_init():
+        try:
+            await ensure_sync_indexes()
+        except Exception as e:
+            logger.warning(f"sync index init skipped: {e}")
+
+    # Run off the startup path so a slow/unavailable index build can never stop
+    # the app from serving traffic.
+    asyncio.create_task(_bg_init())
     asyncio.create_task(auto_sync_loop())
 
 

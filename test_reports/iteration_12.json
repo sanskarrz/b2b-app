@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 12 — pandas/numpy removal regression. 20/20 pytest tests passing. Confirmed: (1) ZERO pandas/numpy/pd.*/np.* references in /app/backend/*.py and NOT in requirements.txt; (2) `import server` succeeds under a sys.meta_path blocker that denies both packages; (3) startup() no longer awaits ensure_sync_indexes directly — it schedules _bg_init() via asyncio.create_task; (4) ensure_sync_indexes creates a NON-unique index (no `unique=True`); (5) backend serves /api/distributors with 200 immediately after `sudo supervisorctl restart backend`; (6) xlsx import via openpyxl parsed 2366 products in <2s with correct field mapping (code/name/pack/mrp/rate/stock as native numeric); (7) same-file re-import → 0 inserted, all updated (dedupe via upsert works without unique index); (8) stdlib-csv import, multi-sheet workbook (Items+Parties both detected), .xls → clean 400, garbage → clean 400; (9) Google Sheets drive link import returned 2366 product rows; (10) Full CSV export base64-decodes to a CSV whose header starts 'Invoice No,Order Code,Date,Party Name'; (11) Full XLSX export openable by openpyxl with sheet name 'Orders' and matching header row; (12) immediately-following incremental export → 400 'No new orders to export since your last export.'; (13) register + verify-otp works for both pharmacy and distributor, owner can hit /distributor/me/dashboard, and sync/browse?q=GLUCOSE returns proper shape. Desktop sidebar + export-full-csv/export-full-xlsx testIDs confirmed on /d/sync at 1280x832 viewport.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration12_regression.py",
+    "/app/backend/tests/_test_import_no_pandas.py",
+    "/app/test_reports/pytest/pytest_iteration12.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 4252 lines — well above the 700-line threshold. Not a blocker for this iteration but should be split into routers (auth, orders, payments, distributor, sync) in a dedicated refactor."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Test data created temporary TEST_ prefixed products/parties through the import flow; cleared product collection pre-xlsx-test to make the inserted count assertable; no production data mutated.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend has NO pandas/numpy dependency. All ERP sync (import xlsx/csv/drive, export csv/xlsx) and dedupe behavior validated. Index is non-unique and background-created. Sample xlsx at /app/backend/tests/sample_nn_stock_report.xlsx (~2366 products, header row 4). The Drive link https://docs.google.com/spreadsheets/d/1x_iAHuQBr-Gy9u0ic5J2Jq9USmdUbnQB/edit was reachable and returned 2366 rows.",
+  "rca_of_issue": "User's 520 was consistent with Cloudflare marking the FastAPI pod OOM/unresponsive at startup. Root cause fix (verified): pandas/numpy no longer imported at module scope (dropped from both source and requirements.txt); ensure_sync_indexes is non-unique AND runs in a background asyncio task so startup() does not block or crash on duplicate-key errors. Replacements use openpyxl (read_only, data_only), stdlib csv, and xlsxwriter — all lightweight and already in requirements.txt. Numeric columns coming back as native float from openpyxl are handled consistently by downstream _num() cleaning."
+}
