@@ -364,7 +364,8 @@ async def push_to_stock(did: str, records: List[dict]) -> dict:
     # `distributor_ids` already tells us whether this distributor has an entry
     # (push_to_stock always $addToSet's the id alongside any prices[] write).
     existing = await db.products.find(
-        {}, {"_id": 0, "id": 1, "name": 1, "pack": 1, "barcode": 1, "distributor_ids": 1}
+        {}, {"_id": 0, "id": 1, "name": 1, "pack": 1, "barcode": 1,
+             "distributor_ids": 1, "source": 1}
     ).to_list(200000)
 
     by_barcode: Dict[str, dict] = {}
@@ -377,21 +378,45 @@ async def push_to_stock(did: str, records: List[dict]) -> dict:
         by_name_pack.setdefault(_norm(p.get("name")) + "|" + _norm(p.get("pack")), p)
         by_name.setdefault(_norm(p.get("name")), p)
 
+    # The same medicine can appear on several report rows (one per internal
+    # item code / batch). Collapse them into one catalogue line and SUM the
+    # stock, so no row is silently dropped and quantities stay truthful.
+    merged: Dict[str, dict] = {}
+    for r in records:
+        nm = (r.get("name") or "").strip()
+        if not nm:
+            continue
+        k = _norm(nm) + "|" + _norm(r.get("pack"))
+        m = merged.get(k)
+        if not m:
+            merged[k] = {**r, "name": nm, "stock": float(r.get("stock") or 0)}
+            continue
+        m["stock"] = (m.get("stock") or 0) + float(r.get("stock") or 0)
+        # Prefer real (non-zero) rates and any detail the other row was missing.
+        for f in ("mrp", "rate", "pts", "purchase_rate", "gp_pct"):
+            if not m.get(f) and r.get(f):
+                m[f] = r[f]
+        for f in ("code", "company", "barcode", "expiry", "batch", "hsn", "gst", "rack"):
+            if not m.get(f) and r.get(f):
+                m[f] = r[f]
+
     ops: list = []
     updated = created = 0
-    new_keys = set()
 
-    for r in records:
-        name = (r.get("name") or "").strip()
-        if not name:
-            continue
+    for r in merged.values():
+        name = r["name"]
         mrp = r.get("mrp") or 0.0
         ptr = r.get("rate") or r.get("pts") or 0.0
         qty = int(r.get("stock") or 0)
         bc = str(r.get("barcode") or "").strip()
-        key_np = _norm(name) + "|" + _norm(r.get("pack"))
+        status = "in_stock" if qty > 20 else "low" if qty > 0 else "out_of_stock"
 
+        key_np = _norm(name) + "|" + _norm(r.get("pack"))
         p = (by_barcode.get(bc) if bc else None) or by_name_pack.get(key_np) or by_name.get(_norm(name))
+
+        # Only the report's own rows carry GST; when the report has no GST column
+        # leave the field alone so the app's existing rate keeps applying.
+        gst = r.get("gst") or None
 
         if p:
             has_entry = did in (p.get("distributor_ids") or [])
@@ -406,29 +431,48 @@ async def push_to_stock(did: str, records: List[dict]) -> dict:
                     sets["prices.$[e].mrp"] = mrp
                 if r.get("expiry"):
                     sets["prices.$[e].expiry"] = r["expiry"]
-                if r.get("gst"):
-                    sets["prices.$[e].gst_pct"] = r["gst"]
+                if gst:
+                    sets["prices.$[e].gst_pct"] = gst
+                # Keep the marketplace honest for lines this distributor alone
+                # supplies: refresh availability and the headline rate too.
+                # Shared lines are left alone — another distributor's zero stock
+                # must not mark the medicine out of stock for everyone.
+                if p.get("source") == "erp_import" and (p.get("distributor_ids") or []) == [did]:
+                    sets["stock_status"] = status
+                    if mrp:
+                        sets["mrp"] = mrp
+                    if ptr:
+                        sets["ptr"] = ptr
+                        sets["margin_pct"] = _margin(mrp, ptr)
                 ops.append(UpdateOne(
                     {"id": p["id"]},
                     {"$set": sets, "$addToSet": {"distributor_ids": did}},
                     array_filters=[{"e.distributor_id": did}],
                 ))
             else:
+                entry = {
+                    "distributor_id": did, "ptr": ptr, "mrp": mrp, "scheme": None,
+                    "margin_pct": _margin(mrp, ptr), "qty_available": qty,
+                    "dist_discount_pct": 0, "expiry": r.get("expiry"),
+                    "delivery_eta_hours": 24,
+                }
+                if gst:
+                    entry["gst_pct"] = gst
                 ops.append(UpdateOne(
                     {"id": p["id"]},
-                    {"$push": {"prices": {
-                        "distributor_id": did, "ptr": ptr, "mrp": mrp, "scheme": None,
-                        "margin_pct": _margin(mrp, ptr), "qty_available": qty,
-                        "dist_discount_pct": 0, "gst_pct": r.get("gst") or 0,
-                        "expiry": r.get("expiry"), "delivery_eta_hours": 24,
-                    }},
+                    {"$push": {"prices": entry},
                      "$addToSet": {"distributor_ids": did}},
                 ))
             updated += 1
         else:
-            if key_np in new_keys:
-                continue
-            new_keys.add(key_np)
+            entry = {
+                "distributor_id": did, "ptr": ptr, "mrp": mrp, "scheme": None,
+                "margin_pct": _margin(mrp, ptr), "qty_available": qty,
+                "dist_discount_pct": 0, "expiry": r.get("expiry"),
+                "delivery_eta_hours": 24,
+            }
+            if gst:
+                entry["gst_pct"] = gst
             ops.append(InsertOne({
                 "id": f"p-erp-{uuid.uuid4().hex[:10]}",
                 "name": name,
@@ -442,15 +486,10 @@ async def push_to_stock(did: str, records: List[dict]) -> dict:
                 "category": "General",
                 "distributor_ids": [did],
                 "best_distributor_id": did,
-                "stock_status": "in_stock" if qty > 20 else "low" if qty > 0 else "out_of_stock",
+                "stock_status": status,
                 "image_emoji": "💊",
                 "barcode": bc or None,
-                "prices": [{
-                    "distributor_id": did, "ptr": ptr, "mrp": mrp, "scheme": None,
-                    "margin_pct": _margin(mrp, ptr), "qty_available": qty,
-                    "dist_discount_pct": 0, "gst_pct": r.get("gst") or 0,
-                    "expiry": r.get("expiry"), "delivery_eta_hours": 24,
-                }],
+                "prices": [entry],
                 "source": "erp_import",
                 "erp_code": r.get("code"),
                 "created_at": iso(now_utc()),

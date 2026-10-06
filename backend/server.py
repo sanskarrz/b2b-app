@@ -823,7 +823,7 @@ async def get_product(pid: str):
         raise HTTPException(404, "Not found")
 
     # Build per-distributor offers (same shape as search/comprehensive)
-    dist_map = {d["id"]: d for d in await db.distributors.find({}, {"_id": 0}).to_list(50)}
+    dist_map = {d["id"]: d for d in await db.distributors.find({}, {"_id": 0}).to_list(2000)}
     offers: List[dict] = []
     for pr in (p.get("prices") or []):
         d = dist_map.get(pr["distributor_id"])
@@ -1128,7 +1128,7 @@ async def pay_invoice(pid: str, user: dict = Depends(get_current_user)):
 async def payment_summary_v1(user: dict = Depends(get_current_user)):
     """Comprehensive payment overview for accounting (defined early to avoid /{pid} match)."""
     payments = await db.payments.find({"user_id": user["id"]}, {"_id": 0}).to_list(500)
-    distributors = await db.distributors.find({}, {"_id": 0}).to_list(50)
+    distributors = await db.distributors.find({}, {"_id": 0}).to_list(2000)
 
     total_due = sum(p["amount"] for p in payments if p["status"] in ("due", "overdue"))
     total_overdue = sum(p["amount"] for p in payments if p["status"] == "overdue")
@@ -1666,7 +1666,7 @@ async def search_comprehensive(q: str, user: dict = Depends(get_current_user)):
             {"salt": {"$regex": q, "$options": "i"}}, {"_id": 0}
         ).to_list(20)
 
-    dist_map = {d["id"]: d for d in await db.distributors.find({}, {"_id": 0}).to_list(50)}
+    dist_map = {d["id"]: d for d in await db.distributors.find({}, {"_id": 0}).to_list(2000)}
 
     def build_row(p: dict) -> dict:
         prices = p.get("prices") or []
@@ -1717,7 +1717,7 @@ async def search_comprehensive(q: str, user: dict = Depends(get_current_user)):
 async def payment_summary(user: dict = Depends(get_current_user)):
     """Comprehensive payment overview for accounting."""
     payments = await db.payments.find({"user_id": user["id"]}, {"_id": 0}).to_list(500)
-    distributors = await db.distributors.find({}, {"_id": 0}).to_list(50)
+    distributors = await db.distributors.find({}, {"_id": 0}).to_list(2000)
 
     total_due = sum(p["amount"] for p in payments if p["status"] in ("due", "overdue"))
     total_overdue = sum(p["amount"] for p in payments if p["status"] == "overdue")
@@ -2577,7 +2577,7 @@ class ChatMsgReq(BaseModel):
 async def chat_threads(user: dict = Depends(get_current_user)):
     """List all chat threads — one per distributor — with last message preview."""
     # Pull all distributors that have any chat OR any order with this user
-    distributors = await db.distributors.find({}, {"_id": 0}).to_list(50)
+    distributors = await db.distributors.find({}, {"_id": 0}).to_list(2000)
     threads = []
     for d in distributors:
         last = await db.chat_messages.find_one(
@@ -2748,7 +2748,7 @@ async def seed_demo_user_credit(user_id: str) -> None:
     new per-customer model."""
     if await db.customer_credit.count_documents({"user_id": user_id}) > 0:
         return
-    dists = await db.distributors.find({}, {"_id": 0}).to_list(50)
+    dists = await db.distributors.find({}, {"_id": 0}).to_list(2000)
     base = now_utc()
     for d in dists:
         await db.customer_credit.insert_one({
