@@ -219,3 +219,16 @@ The Expo app already runs on web (React Native Web). Made the **distributor-side
 - Payment gateway (Razorpay/Stripe UPI) for in-app collections.
 - Real cron for scheduled area-wise bill generation.
 - Consider refactoring `server.py` (4100+ lines) into routers/models modules.
+
+## Retailer change requirements (client doc) — Jun 2026
+Backend: new `retail_features.py` (`retail_router`) + helpers in `server.py` (`notify`, `is_mapped`, `scheme_detail/label/apply`, `effective_ptr`, `delivery_estimate`). Disputes extended in `client_features.py` (`create_dispute_doc`, `/disputes/{id}/unflag`).
+- **Mapping**: `mappings` collection (pending|mapped|rejected|unmapped). Pharmacy requests (`POST /retail/mappings`), distributor approves with credit limit/days (`/distributor/me/mapping-requests/{uid}/approve|reject`), either side unmaps (pharmacy blocked while credit_used>0). Unmapped = cash/advance only (credit order → 400). Existing customer_credit pairs migrated as mapped. Cart & distributor page now read the per-customer credit record (not the distributor default).
+- **GPS proximity**: `PATCH /auth/location`, `PATCH /distributor/me/location`; unmapped list sorted by haversine km.
+- **Credit rating**: auto score/grade (A+..D/New) from payment history + star ratings both ways (`ratings` collection). Distributor score from fulfilment + query resolution.
+- **Notifications**: `notifications` collection; hooks on order placed/accepted/status, payment recorded, mapping events, query raised/updated/closed. Screens `/notifications`, `/d/notifications` + bell badges.
+- **Search** (`/retail/search`): Pharmarack-style flat cards, Mapped/Non-Mapped tabs, distributor filter, "+" add, sticky cart bar. **Compare** (`/retail/compare/{pid}`): product-wise, ranked by scheme-adjusted margin, with delivery ETA.
+- **Schemes**: `scheme_detail` {free|percent|rupee|slab|custom}; applied in cart + order (free_qty / net unit price). Editor in `/d/inventory`.
+- **Delivery slots**: distributor localities + cut-off slots (`/distributor/me/delivery-slots`, IST), shown as "Delivery by X, Today/Tomorrow".
+- **Shortbook notes** (text / voice→text + audio saved / photo) + Raise a Query; **Returns**: bill search, checkbox multi-select, Sellable/Issue pre-picked from payment state; **Flag/Unflag** tickets (raiser unflags only after resolved).
+- Uploads via Emergent Object Storage (`/uploads`, `/files/{id}?token=`), STT via `gpt-4o-mini-transcribe` (`/transcribe`).
+- Removed retailer Margin Analyzer, Profit Report, GST Invoices, Reports & Analytics. Floating chat button on pharmacy tabs. OTP inputs forced black on white; app forced light mode.

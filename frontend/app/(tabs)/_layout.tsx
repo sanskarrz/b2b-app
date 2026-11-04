@@ -1,13 +1,16 @@
 import { Tabs } from "expo-router";
+import { View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "@/src/theme";
+import { FloatingChat } from "@/src/components/FloatingChat";
 
 export default function TabsLayout() {
   // Android phones with on-screen navigation buttons report a bottom inset —
   // add it so the tab bar never sits under the system buttons.
   const insets = useSafeAreaInsets();
   return (
+    <View style={{ flex: 1 }}>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -70,5 +73,7 @@ export default function TabsLayout() {
         }}
       />
     </Tabs>
+    <FloatingChat bottom={64 + insets.bottom + 14} />
+    </View>
   );
 }

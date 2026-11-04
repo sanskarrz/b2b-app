@@ -14,7 +14,7 @@ Iteration 14 - Focused re-verification of:
 """
 import os, base64, uuid, time, pytest, requests
 
-BASE = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://pharmacy-b2b.preview.emergentagent.com").rstrip("/")
+BASE = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://distro-import--1znvr854.preview.emergentagent.com").rstrip("/")
 API = f"{BASE}/api"
 SAMPLE = "/app/backend/tests/sample_nn_stock_report.xlsx"
 

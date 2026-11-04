@@ -288,7 +288,10 @@ export default function Cart() {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.pName} numberOfLines={1}>{item.product.name}</Text>
                     <Text style={styles.pMeta}>{item.product.pack}</Text>
-                    <Text style={styles.pPrice}>{formatINRFull(item.product.ptr)} <Text style={styles.pPriceUnit}>/ unit</Text></Text>
+                    <Text style={styles.pPrice}>{formatINRFull(item.unit_price ?? item.product.ptr)} <Text style={styles.pPriceUnit}>/ unit</Text></Text>
+                    {(!!item.scheme_label || item.free_qty > 0) && (
+                      <Text style={styles.pMeta}>Scheme {item.scheme_label}{item.free_qty > 0 ? ` · +${item.free_qty} free` : ""}</Text>
+                    )}
                   </View>
                   <View style={styles.qtyCol}>
                     <View style={styles.qtyBox}>
@@ -318,6 +321,11 @@ export default function Cart() {
               {/* Payment Method Selector */}
               <View style={styles.paymentSection}>
                 <Text style={styles.paymentLabel}>Payment method</Text>
+                {!items[0].mapped && (
+                  <Text style={[styles.pMeta, { color: "#92400E", marginBottom: 6 }]} testID={`unmapped-note-${did}`}>
+                    Not mapped with {dist.short_name} — cash / advance only. Request mapping from Distributors → Unmapped for credit.
+                  </Text>
+                )}
                 <View style={styles.payToggle}>
                   <TouchableOpacity
                     style={[styles.payOpt, selected === "cash" && styles.payOptActive]}
@@ -339,8 +347,10 @@ export default function Cart() {
                       styles.payOpt,
                       selected === "credit" && styles.payOptActive,
                       !creditOk && selected === "credit" && styles.payOptError,
+                      !items[0].mapped && { opacity: 0.4 },
                     ]}
-                    onPress={() => setMethodFor(did, "credit")}
+                    onPress={() => items[0].mapped && setMethodFor(did, "credit")}
+                    disabled={!items[0].mapped}
                     testID={`pay-credit-${did}`}
                     activeOpacity={0.85}
                   >

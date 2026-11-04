@@ -56,9 +56,9 @@ export default function More() {
         { icon: "bookmark-outline", label: "Order Templates", onPress: () => router.push("/templates"), testID: "more-templates" },
         { icon: "heart-outline", label: "Favourites & Watchlist", onPress: () => router.push("/favourites"), testID: "more-favs" },
         { icon: "document-text-outline", label: "Credit / Debit Notes", onPress: () => router.push("/credit-note/new"), testID: "more-cn" },
-        { icon: "list-outline", label: "Shortbook (Auto-reorder)", onPress: () => router.push("/shortbook"), testID: "more-shortbook" },
-        { icon: "return-up-back-outline", label: "Returns & Refunds", onPress: () => router.push("/returns"), testID: "more-returns" },
-        { icon: "help-buoy-outline", label: "My Queries & Disputes", onPress: () => router.push("/disputes"), testID: "more-disputes" },
+        { icon: "list-outline", label: "Shortbook (Notes, Voice & Queries)", onPress: () => router.push("/shortbook"), testID: "more-shortbook" },
+        { icon: "return-up-back-outline", label: "Returns & Bill Flags", onPress: () => router.push("/returns"), testID: "more-returns" },
+        { icon: "flag-outline", label: "My Flags & Queries", onPress: () => router.push("/disputes"), testID: "more-disputes" },
         { icon: "cube-outline", label: "Bulk Order", onPress: () => router.push("/bulk-order"), testID: "more-bulk" },
       ],
     },
@@ -66,17 +66,9 @@ export default function More() {
       title: "Smart Tools",
       items: [
         { icon: "calculator-outline", label: "Margin Calculator (PTR ↔ MRP)", onPress: () => router.push("/calculator"), testID: "more-calc" },
-        { icon: "git-compare-outline", label: "Compare Distributors", onPress: () => router.push("/compare"), testID: "more-compare" },
-        { icon: "bar-chart-outline", label: "Margin Analyzer by Category", onPress: () => router.push("/analytics/margin"), testID: "more-margin" },
+        { icon: "git-compare-outline", label: "Compare Products (by margin)", onPress: () => router.push("/compare"), testID: "more-compare" },
+        { icon: "ribbon-outline", label: "My Credit Rating", onPress: () => router.push("/credit-rating"), testID: "more-credit-rating" },
         { icon: "trending-up-outline", label: "Smart Reorder Predictor", onPress: () => router.push("/reorder-predictor"), testID: "more-reorder" },
-      ],
-    },
-    {
-      title: "Reports & Insights",
-      items: [
-        { icon: "stats-chart-outline", label: "Sales Analytics", onPress: () => router.push("/reports/analytics"), testID: "more-analytics" },
-        { icon: "document-text-outline", label: "GST Invoices", onPress: () => router.push("/reports/gst-invoices"), testID: "more-gst" },
-        { icon: "trending-up-outline", label: "Profit Report", onPress: () => router.push("/reports/profit"), testID: "more-profit" },
       ],
     },
     {

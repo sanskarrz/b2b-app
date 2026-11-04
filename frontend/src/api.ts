@@ -11,6 +11,16 @@ async function getToken(): Promise<string | null> {
   return (await storage.secureGet("rxtech_token", "")) || null;
 }
 
+export const authToken = getToken;
+
+/** URL for an uploaded file (photo / voice). Token in query so <Image>/<audio> work on web + native. */
+export async function fileUrl(fileId: string): Promise<string> {
+  const t = await getToken();
+  return `${BASE}/api/files/${fileId}?token=${encodeURIComponent(t || "")}`;
+}
+
+export const apiBase = `${BASE}/api`;
+
 export async function setToken(token: string) {
   await storage.secureSet("rxtech_token", token);
 }

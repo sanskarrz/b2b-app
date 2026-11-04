@@ -9,7 +9,7 @@ import uuid
 import pytest
 import requests
 
-BASE = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://pharmacy-b2b.preview.emergentagent.com").rstrip("/")
+BASE = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://distro-import--1znvr854.preview.emergentagent.com").rstrip("/")
 API = f"{BASE}/api"
 SAMPLE_XLSX = "/app/backend/tests/sample_nn_stock_report.xlsx"
 

@@ -25,12 +25,18 @@ from pydantic import BaseModel
 
 from server import (
     db, get_current_user, get_owned_distributor, staff_distributor, require_role,
-    now_utc, iso, cc_get, cc_inc, is_blacklisted, maybe_auto_accept,
+    now_utc, iso, cc_get, cc_inc, is_blacklisted, maybe_auto_accept, notify,
 )
 
 feature_router = APIRouter(prefix="/api")
 
-DISPUTE_TYPES = {"wrong_supply", "return", "credit", "other"}
+# Client issue categories (flag / query ticket) + legacy types kept for old data
+ISSUE_CATEGORIES = {"damaged_goods", "wrong_supply", "extra_supply", "no_supply", "rate_scheme"}
+DISPUTE_TYPES = ISSUE_CATEGORIES | {"return", "credit", "other"}
+CATEGORY_LABELS = {
+    "damaged_goods": "Damaged Goods", "wrong_supply": "Wrong Supply", "extra_supply": "Extra Supply",
+    "no_supply": "No Supply", "rate_scheme": "Rate/Scheme Issue", "return": "Return", "credit": "Credit", "other": "Other",
+}
 STOCK_REASONS = {"damage", "expiry", "correction", "theft"}
 
 
@@ -133,16 +139,36 @@ class DisputeReq(BaseModel):
     description: Optional[str] = None
     order_id: Optional[str] = None
     photos: Optional[List[str]] = None
+    photo_file_ids: Optional[List[str]] = None
+    audio_file_id: Optional[str] = None
+    transcript: Optional[str] = None
+    bill_ids: Optional[List[str]] = None
+    bill_numbers: Optional[List[str]] = None
+    mode: Optional[str] = None  # sellable | issue (returns)
+    source: Optional[str] = None  # shortbook | returns | order | manual
+    note_id: Optional[str] = None
 
 
-@feature_router.post("/disputes")
-async def create_dispute(req: DisputeReq, user: dict = Depends(get_current_user)):
+async def create_dispute_doc(req: DisputeReq, user: dict) -> dict:
     if req.type not in DISPUTE_TYPES:
         raise HTTPException(400, f"type must be one of {sorted(DISPUTE_TYPES)}")
+    if not (req.title or "").strip():
+        raise HTTPException(400, "Title is required")
     d = await db.distributors.find_one({"id": req.distributor_id}, {"_id": 0})
     if not d:
         raise HTTPException(404, "Distributor not found")
+    file_ids = list(req.photo_file_ids or []) + ([req.audio_file_id] if req.audio_file_id else [])
+    if file_ids:  # let the distributor open the attachments
+        await db.files.update_many({"id": {"$in": file_ids}, "owner_id": user["id"]},
+                                   {"$addToSet": {"shared_with": req.distributor_id}})
     doc = {
+        "category_label": CATEGORY_LABELS.get(req.type, req.type),
+        "flagged": True,
+        "photo_file_ids": req.photo_file_ids or [], "audio_file_id": req.audio_file_id,
+        "transcript": (req.transcript or "").strip() or None,
+        "bill_ids": req.bill_ids or [], "bill_numbers": req.bill_numbers or [],
+        "mode": req.mode if req.mode in ("sellable", "issue") else None,
+        "source": req.source or "manual", "note_id": req.note_id,
         "id": str(uuid.uuid4()), "code": _gen_code("DSP"),
         "distributor_id": req.distributor_id, "distributor_name": d.get("short_name"),
         "user_id": user["id"], "customer_name": user.get("shop_name") or user.get("name") or user.get("email"),
@@ -154,7 +180,34 @@ async def create_dispute(req: DisputeReq, user: dict = Depends(get_current_user)
         "activities": [{"at": iso(now_utc()), "by": "customer", "text": "Query raised"}],
     }
     await db.disputes.insert_one({**doc})
+    await notify(f"New query flagged: {doc['category_label']}",
+                 f"{doc['customer_name']} — {doc['title']}" + (f" (Bill {', '.join(doc['bill_numbers'])})" if doc["bill_numbers"] else ""),
+                 distributor_id=req.distributor_id, kind="query", link="/d/queries")
+    doc.pop("_id", None)
+    return doc
+
+
+@feature_router.post("/disputes")
+async def create_dispute(req: DisputeReq, user: dict = Depends(get_current_user)):
+    doc = await create_dispute_doc(req, user)
     return {"success": True, "dispute": doc}
+
+
+@feature_router.post("/disputes/{dispute_id}/unflag")
+async def unflag_dispute(dispute_id: str, user: dict = Depends(get_current_user)):
+    """Only the party that raised the ticket may unflag it, and only after the
+    distributor has resolved (or rejected) it."""
+    disp = await db.disputes.find_one({"id": dispute_id}, {"_id": 0})
+    if not disp or disp.get("created_by") != user["id"]:
+        raise HTTPException(404, "Query not found")
+    if disp.get("status") not in ("resolved", "rejected"):
+        raise HTTPException(400, "You can unflag only after the distributor resolves this query")
+    acts = disp.get("activities", []) + [{"at": iso(now_utc()), "by": "customer", "text": "Unflagged & closed by retailer"}]
+    await db.disputes.update_one({"id": dispute_id}, {"$set": {
+        "flagged": False, "status": "closed", "closed_at": iso(now_utc()), "updated_at": iso(now_utc()), "activities": acts}})
+    await notify("Query closed", f"{disp.get('customer_name')} unflagged {disp.get('code')} — {disp.get('title')}",
+                 distributor_id=disp["distributor_id"], kind="query", link="/d/queries")
+    return {"success": True, "status": "closed"}
 
 
 @feature_router.get("/disputes")
@@ -173,7 +226,7 @@ async def dist_disputes(type: Optional[str] = None, status: Optional[str] = None
         q["status"] = status
     rows = await db.disputes.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     counts_rows = await db.disputes.find({"distributor_id": d["id"]}, {"_id": 0, "status": 1, "type": 1}).to_list(2000)
-    counts = {"open": 0, "in_progress": 0, "resolved": 0, "rejected": 0}
+    counts = {"open": 0, "in_progress": 0, "resolved": 0, "rejected": 0, "closed": 0}
     for r in counts_rows:
         counts[r.get("status", "open")] = counts.get(r.get("status", "open"), 0) + 1
     return {"items": rows, "counts": counts}
@@ -203,7 +256,13 @@ async def update_dispute(dispute_id: str, req: DisputeUpdateReq, user: dict = De
     if req.note:
         acts.append({"at": iso(now_utc()), "by": "distributor", "text": req.note.strip()})
     upd["activities"] = acts
+    if disp.get("status") == "closed":
+        raise HTTPException(400, "This query was already closed by the retailer")
     await db.disputes.update_one({"id": dispute_id}, {"$set": upd})
+    msg = f"{disp.get('code')} — {disp.get('title')}: " + (f"status {req.status}" if req.status else "new update")
+    if req.status in ("resolved", "rejected"):
+        msg += ". Please review and unflag it."
+    await notify(f"Query update from {d.get('short_name')}", msg, user_id=disp["user_id"], kind="query", link="/disputes")
     return {"success": True}
 
 

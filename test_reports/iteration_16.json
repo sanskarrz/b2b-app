@@ -1,0 +1,36 @@
+{
+  "summary": "Retest of iteration_15 fixes. All 6 requested items verified as fixed. Backend: new suite test_iteration16_retest.py 6/7 pass (the one failure is an extra edge case: a slab scheme_detail whose slabs are not a list of objects returns 500). Regression: test_iteration15_retail 20/20 and iteration14_mapping + client_features 65/65 pass. Frontend at 390x844 as demo@rxtech.com: the /search distributor chip no longer overlaps the scan button and opens the picker when tapped. The /returns Bill number input ends at x=374, inside the 390px screen. On Vendors the floating chat button (y=712) does not cover any Map/Unmap button at the bottom of the Mapped or Unmapped tab. Unmapping dist-1 (₹1,35,867 outstanding) shows only the 'Can't unmap yet' toast with no confirm dialog. On /disputes, legacy resolved DSP-82214 (no flagged field) shows 'Confirm & Unflag' and unflagging it works (status is now closed, flagged=false). No deprecated Expo packages found in the files reviewed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/distributor/me/inventory/{pid}", "issue": "scheme_detail {type:'slab', slabs:'abc'} or slabs:['x'] returns 500 (AttributeError: x.get on a non-dict) instead of 400. All requested cases return 400: missing pct/amount/buy, pct out of range, empty/missing slabs, slab missing buy/free, empty custom text."},
+      {"endpoint": "customer_credit (dist-3 for demo@rxtech.com)", "issue": "credit_used is -150, shown in Vendors as 'Credit ₹-150 / ₹1.0L'. Likely cause: the short-supply refund in server.py ~line 2189 and the return-credit path ~line 2257 use $inc without clamping at 0, unlike _adjust_credit which uses max(0, ...)."},
+      {"endpoint": "POST /api/distributor/me/customers/{id}/rating", "issue": "The customer check accepts any mappings document, including pending or rejected ones. A distributor can rate a pharmacy that only sent a request or was rejected. Consider filtering to status 'mapped' or 'unmapped', or requiring an order."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/disputes", "issues": ["Open legacy queries without a flagged field (e.g. DSP-72588) show 'FLAGGED' with no 🚩 icon, while new ones show '🚩 FLAGGED'. Use d.flagged !== false for the icon too.", "'Confirm & Unflag' closes the ticket in one tap with no confirmation step, although the label suggests one."]},
+      {"screen": "/search", "issues": ["The search input is about 142px wide at 390px, so the placeholder 'Search medicine, salt…' is cut off. Cosmetic only."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration16_retest.py", "/app/test_reports/pytest/pytest_iter16.xml"],
+  "action_items": [
+    "In the PATCH inventory scheme validation, check that slabs is a list of dicts. Also catch AttributeError, or validate scheme_detail with a Pydantic model, so malformed slabs return 400.",
+    "Clamp credit_used at 0 in the short-supply refund and return/credit-note $inc paths. Fix the existing negative value for demo dist-3.",
+    "Optional: limit distributor rating to pharmacies with mapping status 'mapped' or 'unmapped', or with an order. Show the 🚩 icon whenever d.flagged !== false."
+  ],
+  "critical_code_review_comments": [
+    "retail_features.py dist_unmap allows a distributor to unmap a pharmacy with outstanding credit. credit_used is kept and GET /distributors/{id} shows credit_limit 0 with credit_used intact, as intended, and credit orders are then blocked (400).",
+    "request_mapping allows role None or 'pharmacist'. Owner and manager now get 403 (verified)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration16_retest.py"],
+  "success_rate": {"backend": "96% (26/27 in targeted suites; the 1 failure is an extra edge case) plus 65/65 regression", "frontend": "100% (6/6 requested checks)"},
+  "seed_data_creation": "Created throwaway TEST_ pharmacies (test_*@example.com) plus TEST_ shortbook notes and queries. One TEST_ pharmacy placed a small credit order with dist-1 and was then unmapped by the distributor. Unflagged DSP-82214, a TEST_ query on demo, which is now closed. demo@rxtech.com stays mapped to dist-1..dist-5 (never unmapped).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "OTP screen on web: type the OTP into otp-input-0, then click verify-otp-btn (auto-submit is not reliable), then wait for **/home. demo legacy resolved query DSP-62077 (no flagged field) is still available for unflag UI tests. Floating chat testID is 'floating-chat'. Run: EXPO_PUBLIC_BACKEND_URL=<url> pytest tests/test_iteration16_retest.py"
+}

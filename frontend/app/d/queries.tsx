@@ -7,16 +7,18 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { api } from "@/src/api";
 import { showError, showSuccess } from "@/src/components/Toast";
 import { colors, radius } from "@/src/theme";
+import { TYPE_LABEL, STATUS_COLOR, STATUS_LABEL } from "@/src/utils/queryLabels";
+import { FileImage, VoicePlayer } from "@/src/components/FileMedia";
 
 const TYPES = [
   { k: "", l: "All" },
+  { k: "damaged_goods", l: "Damaged" },
   { k: "wrong_supply", l: "Wrong supply" },
-  { k: "return", l: "Returns" },
-  { k: "credit", l: "Credit" },
+  { k: "extra_supply", l: "Extra supply" },
+  { k: "no_supply", l: "No supply" },
+  { k: "rate_scheme", l: "Rate/Scheme" },
   { k: "other", l: "Other" },
 ];
-const TYPE_LABEL: any = { wrong_supply: "Wrong supply", return: "Order return", credit: "Credit problem", other: "Other" };
-const STATUS_COLOR: any = { open: colors.warning, in_progress: colors.info, resolved: colors.success, rejected: colors.danger };
 
 export default function Queries() {
   const router = useRouter();
@@ -86,13 +88,13 @@ export default function Queries() {
           renderItem={({ item: d }) => (
             <TouchableOpacity style={styles.card} onPress={() => { setSel(d); setResolution(d.resolution || ""); }} testID={`query-${d.id}`}>
               <View style={styles.cardTop}>
-                <Text style={styles.code}>{d.code} · {TYPE_LABEL[d.type]}</Text>
+                <Text style={styles.code}>{d.code} · {TYPE_LABEL[d.type] || d.type}{d.mode ? ` · ${d.mode === "sellable" ? "Sellable" : "Issue"}` : ""}</Text>
                 <View style={[styles.statusPill, { backgroundColor: (STATUS_COLOR[d.status] || colors.textSecondary) + "22" }]}>
-                  <Text style={[styles.statusText, { color: STATUS_COLOR[d.status] || colors.textSecondary }]}>{(d.status || "").toUpperCase()}</Text>
+                  <Text style={[styles.statusText, { color: STATUS_COLOR[d.status] || colors.textSecondary }]}>{d.flagged ? "🚩 " : ""}{STATUS_LABEL[d.status] || (d.status || "").toUpperCase()}</Text>
                 </View>
               </View>
               <Text style={styles.qTitle}>{d.title}</Text>
-              <Text style={styles.qMeta}>{d.customer_name}{d.order_id ? " · has order ref" : ""}</Text>
+              <Text style={styles.qMeta}>{d.customer_name}{d.bill_numbers?.length ? ` · Bill ${d.bill_numbers.join(", ")}` : ""}{d.order_id ? " · has order ref" : ""}{d.source === "shortbook" ? " · from Shortbook" : ""}</Text>
             </TouchableOpacity>
           )}
         />
@@ -104,8 +106,18 @@ export default function Queries() {
             <View style={styles.handle} />
             <ScrollView keyboardShouldPersistTaps="handled">
               <Text style={styles.modalTitle}>{sel?.title}</Text>
-              <Text style={styles.modalMeta}>{sel?.code} · {TYPE_LABEL[sel?.type]} · {sel?.customer_name}</Text>
+              <Text style={styles.modalMeta}>{sel?.code} · {TYPE_LABEL[sel?.type] || sel?.type} · {sel?.customer_name}</Text>
+              {!!sel?.bill_numbers?.length && <Text style={styles.modalMeta}>Bills: {sel.bill_numbers.join(", ")}{sel.mode ? ` · ${sel.mode === "sellable" ? "Sellable (fully paid)" : "Issue (part / unpaid)"}` : ""}</Text>}
               {!!sel?.description && <Text style={styles.desc}>{sel.description}</Text>}
+              {(sel?.photo_file_ids?.length > 0 || sel?.audio_file_id) && (
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  {(sel.photo_file_ids || []).map((id: string) => <FileImage key={id} id={id} size={72} />)}
+                  {!!sel.audio_file_id && <VoicePlayer id={sel.audio_file_id} />}
+                </View>
+              )}
+              {sel?.status === "closed" ? (
+                <Text style={[styles.desc, { color: colors.success, fontWeight: "700" }]}>Closed — the retailer confirmed and unflagged this ticket.</Text>
+              ) : (<>
               <Text style={styles.fieldLabel}>Resolution note</Text>
               <TextInput value={resolution} onChangeText={setResolution} placeholder="How was it resolved?" placeholderTextColor={colors.textTertiary} style={styles.input} multiline />
               <View style={styles.btnRow}>
@@ -119,6 +131,7 @@ export default function Queries() {
               <TouchableOpacity style={styles.rejectBtn} onPress={() => act("rejected")} disabled={busy}>
                 <Text style={styles.rejectText}>Reject query</Text>
               </TouchableOpacity>
+              </>)}
               <View style={{ height: 20 }} />
             </ScrollView>
           </Pressable>

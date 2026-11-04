@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { api } from "@/src/api";
+import { CustomerRatingCard } from "@/src/components/CustomerRatingCard";
 import { shareCustomerStatement } from "@/src/utils/statement";
 import { showError, showSuccess } from "@/src/components/Toast";
 import { colors, radius, formatINR, formatINRFull } from "@/src/theme";
@@ -129,6 +130,7 @@ export default function DistributorCustomerDetail() {
     <SafeAreaView style={styles.container} edges={["top"]}>
       <Header onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <CustomerRatingCard custId={id as string} onChange={load} />
         {/* Hero */}
         <LinearGradient colors={[colors.primarySoft, colors.primary]} style={styles.hero}>
           <View style={styles.avatar}><Text style={styles.avatarText}>{(c.name || "?")[0]?.toUpperCase()}</Text></View>

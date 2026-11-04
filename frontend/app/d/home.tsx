@@ -13,16 +13,19 @@ export default function DistributorHome() {
   const router = useRouter();
   const [data, setData] = useState<any>(null);
   const [unread, setUnread] = useState(0);
+  const [notifUnread, setNotifUnread] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [d, threads] = await Promise.all([
+      const [d, threads, nt] = await Promise.all([
         api("/distributor/me/dashboard"),
         api("/distributor/me/chat/threads").catch(() => []),
+        api("/distributor/me/notifications").catch(() => ({ unread: 0 })),
       ]);
       setData(d);
+      setNotifUnread(nt.unread || 0);
       setUnread((threads || []).reduce((s: number, t: any) => s + (t.unread || 0), 0));
     } catch (e: any) {
       showError(e?.message || "Could not load dashboard", "Load failed");
@@ -55,6 +58,10 @@ export default function DistributorHome() {
             <Text style={styles.heroSub}>{d.location} • Rating {d.rating}★</Text>
           </View>
           <View style={{ flexDirection: "row", gap: 8 }}>
+            <TouchableOpacity onPress={() => router.push("/d/notifications")} style={styles.heroSettings} testID="d-notif-bell">
+              <Ionicons name="notifications-outline" size={18} color="#FFF" />
+              {notifUnread > 0 && <View style={styles.heroBadge}><Text style={styles.heroBadgeText}>{notifUnread > 9 ? "9+" : notifUnread}</Text></View>}
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push("/d/messages")} style={styles.heroSettings}>
               <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFF" />
               {unread > 0 && <View style={styles.heroBadge}><Text style={styles.heroBadgeText}>{unread}</Text></View>}

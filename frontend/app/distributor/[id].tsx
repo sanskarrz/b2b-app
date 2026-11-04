@@ -9,6 +9,7 @@ import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { TopBar } from "@/src/components/TopBar";
+import { DistRelationCard } from "@/src/components/DistRelationCard";
 import { api } from "@/src/api";
 import { colors, radius, formatINRFull } from "@/src/theme";
 
@@ -54,10 +55,11 @@ export default function DistributorProfile() {
     <SafeAreaView style={styles.container} edges={["top"]}>
       <TopBar title={d.short_name} showBack
         rightIcons={[
-          { name: "git-compare-outline", onPress: () => router.push({ pathname: "/compare", params: { a: id } }), testID: "dp-compare" },
+          { name: "git-compare-outline", onPress: () => router.push("/compare"), testID: "dp-compare" },
         ]}
       />
       <ScrollView contentContainerStyle={{ paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
+        <DistRelationCard distributorId={id} onChange={load} />
         {/* Hero */}
         <LinearGradient colors={[colors.primarySoft, colors.primary]} style={styles.hero}>
           <View style={styles.heroAvatar}>

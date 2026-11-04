@@ -58,6 +58,7 @@ export default function DLayout() {
     <Tabs.Screen key="collections" name="collections" options={{ tabBarIcon: ({ focused }) => <Tab name="Money" icon="cash" focused={focused} /> }} />,
     <Tabs.Screen key="more" name="more" options={{ tabBarIcon: ({ focused }) => <Tab name="More" icon="grid" focused={focused} /> }} />,
     <Tabs.Screen key="c" name="customer/[id]" options={{ href: null }} />,
+    <Tabs.Screen key="notif" name="notifications" options={{ href: null }} />,
     <Tabs.Screen key="mi" name="messages/index" options={{ href: null }} />,
     <Tabs.Screen key="md" name="messages/[id]" options={{ href: null }} />,
     <Tabs.Screen key="team" name="team" options={{ href: null }} />,

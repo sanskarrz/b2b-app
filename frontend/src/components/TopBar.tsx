@@ -8,11 +8,13 @@ export function TopBar({
   subtitle,
   showBack,
   rightIcons,
+  onBack,
 }: {
   title?: string;
   subtitle?: string;
   showBack?: boolean;
   rightIcons?: { name: any; onPress: () => void; testID?: string; badge?: number }[];
+  onBack?: () => void;
 }) {
   const router = useRouter();
   return (
@@ -20,7 +22,7 @@ export function TopBar({
       <View style={styles.left}>
         {showBack ? (
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={onBack || (() => router.back())}
             style={styles.iconBtn}
             testID="topbar-back"
           >

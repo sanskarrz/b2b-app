@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
 import logging
 import random
 import string
@@ -758,6 +759,11 @@ async def get_distributor(dist_id: str, user: Optional[dict] = Depends(get_curre
     last_chat = None
     recent_orders: list = []
     if user:
+        from retail_features import _mapping_map  # noqa: E402
+        mst = ((await _mapping_map(user["id"])).get(dist_id) or {}).get("status") or "unmapped"
+        cc = await db.customer_credit.find_one({"distributor_id": dist_id, "user_id": user["id"]}, {"_id": 0})
+        d = {**d, "credit_limit": (cc or {}).get("credit_limit", 0) if mst == "mapped" else 0, "credit_used": round((cc or {}).get("credit_used", 0) or 0, 2),
+             "credit_days": (cc or {}).get("credit_days", d.get("credit_days")), "mapping_status": mst}
         orders = await db.orders.find({"user_id": user["id"], "distributor_id": dist_id}, {"_id": 0}).to_list(200)
         payments = await db.payments.find({"user_id": user["id"], "distributor_id": dist_id}, {"_id": 0}).to_list(200)
         total_spent = sum(o["total"] for o in orders)
@@ -837,7 +843,7 @@ async def get_product(pid: str):
             "delivery_time": d.get("delivery_time"),
             "ptr": pr["ptr"],
             "mrp": pr.get("mrp", p["mrp"]),
-            "scheme": pr.get("scheme"),
+            "scheme": scheme_label(scheme_detail(pr)),
             "margin_pct": pr.get("margin_pct"),
             "qty_available": pr.get("qty_available", 0),
             "dist_discount_pct": pr.get("dist_discount_pct", 0),
@@ -892,9 +898,18 @@ async def get_cart(user: dict = Depends(get_current_user)):
         d = await db.distributors.find_one({"id": it["distributor_id"]}, {"_id": 0})
         if not p or not d:
             continue
-        subtotal = p["ptr"] * it["qty"]
+        pr = next((x for x in (p.get("prices") or []) if x["distributor_id"] == it["distributor_id"]), None) or {}
+        base = pr.get("ptr", p["ptr"])
+        sa = scheme_apply(pr, base, it["qty"])
+        subtotal = round(sa["unit"] * it["qty"], 2)
         total += subtotal
-        detailed.append({**it, "product": p, "distributor": d, "subtotal": subtotal})
+        mapped = await is_mapped(it["distributor_id"], user["id"])
+        cc = await db.customer_credit.find_one({"distributor_id": it["distributor_id"], "user_id": user["id"]}, {"_id": 0}) if mapped else None
+        d = {**d, "credit_limit": (cc or {}).get("credit_limit", 0), "credit_used": round((cc or {}).get("credit_used", 0) or 0, 2)}
+        detailed.append({**it, "product": {**p, "ptr": base}, "distributor": d, "subtotal": subtotal,
+                         "unit_price": sa["unit"], "free_qty": sa["free_qty"],
+                         "scheme_label": scheme_label(scheme_detail(pr)),
+                         "mapped": mapped})
     return {"items": detailed, "total": total, "count": len(detailed)}
 
 
@@ -1013,6 +1028,8 @@ async def place_order(payment_method: str = "cash", distributor_id: Optional[str
         d = await db.distributors.find_one({"id": dist_id}, {"_id": 0})
         if await is_blacklisted(dist_id, user["id"]):
             raise HTTPException(403, f"You are blacklisted by {d['short_name'] if d else 'this distributor'} and cannot place orders. Please contact them.")
+        if pm == "credit" and not await is_mapped(dist_id, user["id"]):
+            raise HTTPException(400, f"You are not mapped with {d['short_name'] if d else 'this distributor'} — only cash / advance orders are allowed until they approve your mapping.")
         total = 0.0
         order_items = []
         for it in items:
@@ -1020,8 +1037,10 @@ async def place_order(payment_method: str = "cash", distributor_id: Optional[str
             if not p:
                 continue
             price_entry = next((pr for pr in (p.get("prices") or []) if pr["distributor_id"] == dist_id), None)
-            unit = price_entry["ptr"] if price_entry else p["ptr"]
-            line = unit * it["qty"]
+            base_ptr = price_entry["ptr"] if price_entry else p["ptr"]
+            sa = scheme_apply(price_entry or {}, base_ptr, it["qty"])
+            unit = sa["unit"]
+            line = round(unit * it["qty"], 2)
             total += line
             # Enrich line with batch + expiry (would come from distributor in real life)
             batch_id = f"B{random.randint(1000, 9999)}{chr(65 + random.randint(0, 25))}"
@@ -1031,7 +1050,8 @@ async def place_order(payment_method: str = "cash", distributor_id: Optional[str
                 "name": p["name"],
                 "qty_ordered": it["qty"],
                 "qty": it["qty"],  # qty received (initially same; updated on delivery confirmation)
-                "free_qty": 0,
+                "free_qty": sa["free_qty"],
+                "scheme": scheme_label(scheme_detail(price_entry or {})),
                 "price": unit,
                 "mrp": p.get("mrp", 0),
                 "discount_pct": (price_entry or {}).get("dist_discount_pct", 4.0),
@@ -1071,8 +1091,14 @@ async def place_order(payment_method: str = "cash", distributor_id: Optional[str
             "amount_on_credit": total if pm == "credit" else 0,
         }
         await db.orders.insert_one({**order})
+        await notify("New order received",
+                     f"{user.get('shop_name') or user.get('name') or 'A pharmacy'} placed {order['code']} — ₹{total:,.0f} ({pm})",
+                     distributor_id=dist_id, kind="order", link="/d/orders")
         await maybe_auto_accept(order["id"], d, user["id"])
         fresh = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+        if fresh and fresh.get("status") == "accepted":
+            await notify("Order accepted", f"{order['code']} was auto-accepted by {order['distributor_name']}",
+                         user_id=user["id"], kind="order", link=f"/order/{order['id']}")
         orders_created.append(fresh or order)
         code_suffix += 1
 
@@ -1682,7 +1708,7 @@ async def search_comprehensive(q: str, user: dict = Depends(get_current_user)):
                 "delivery_time": d["delivery_time"],
                 "ptr": pr["ptr"],
                 "mrp": pr.get("mrp", p["mrp"]),
-                "scheme": pr.get("scheme"),
+                "scheme": scheme_label(scheme_detail(pr)),
                 "margin_pct": pr.get("margin_pct"),
                 "qty_available": pr.get("qty_available", 0),
                 "dist_discount_pct": pr.get("dist_discount_pct", 0),
@@ -2158,10 +2184,7 @@ async def confirm_delivery(order_id: str, req: ConfirmDeliveryReq, user: dict = 
 
     # Update credit_used: refund the qty-short value (since we charged the full amount at placement)
     if o.get("payment_method") == "credit" and qty_short_total > 0:
-        await db.distributors.update_one(
-            {"id": o["distributor_id"]},
-            {"$inc": {"credit_used": -qty_short_total}},
-        )
+        await cc_inc(o["distributor_id"], o["user_id"], -qty_short_total)
 
     update = {
         "items": new_items,
@@ -2738,6 +2761,148 @@ async def cc_inc(distributor_id: str, user_id: str, delta: float) -> None:
     )
 
 
+# ============================================================================
+# IN-APP NOTIFICATIONS (pharmacy user_id OR distributor_id audience)
+# ============================================================================
+async def notify(title: str, body: str, *, user_id: Optional[str] = None,
+                 distributor_id: Optional[str] = None, kind: str = "info",
+                 link: Optional[str] = None) -> None:
+    try:
+        await db.notifications.insert_one({
+            "id": str(uuid.uuid4()), "user_id": user_id, "distributor_id": distributor_id,
+            "audience": "user" if user_id else "distributor",
+            "title": title, "body": body, "kind": kind, "link": link,
+            "read": False, "created_at": iso(now_utc()),
+        })
+    except Exception as e:  # never block the primary action
+        logger.warning(f"notify failed: {e}")
+
+
+# ============================================================================
+# MAPPING (pharmacy <-> distributor relationship)
+# ============================================================================
+async def is_mapped(distributor_id: str, user_id: str) -> bool:
+    m = await db.mappings.find_one({"distributor_id": distributor_id, "user_id": user_id}, {"_id": 0, "status": 1})
+    return bool(m and m.get("status") == "mapped")
+
+
+# ============================================================================
+# SCHEMES — free qty (10+1), % off, ₹ off, quantity slabs, custom text
+# ============================================================================
+_FREE_RE = re.compile(r"^\s*(\d+)\s*\+\s*(\d+)")
+_PCT_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*%")
+
+
+def scheme_detail(pr: dict) -> Optional[dict]:
+    det = pr.get("scheme_detail")
+    if det and det.get("type"):
+        return det
+    s = (pr.get("scheme") or "").strip()
+    if not s:
+        return None
+    m = _FREE_RE.match(s)
+    if m and int(m.group(1)) > 0:
+        return {"type": "free", "buy": int(m.group(1)), "free": int(m.group(2))}
+    m = _PCT_RE.match(s)
+    if m:
+        return {"type": "percent", "pct": float(m.group(1))}
+    return {"type": "custom", "text": s}
+
+
+def scheme_label(det: Optional[dict]) -> Optional[str]:
+    if not det:
+        return None
+    t = det.get("type")
+    if t == "free":
+        return f"{det.get('buy')}+{det.get('free')}"
+    if t == "percent":
+        return f"{float(det.get('pct') or 0):g}% off"
+    if t == "rupee":
+        return f"₹{float(det.get('amount') or 0):g} off"
+    if t == "slab":
+        parts = []
+        for s in sorted(det.get("slabs") or [], key=lambda x: x.get("min_qty", 0)):
+            parts.append(f"{s.get('buy')}+{s.get('free')}" if s.get("buy") else f"{s.get('pct', 0):g}%")
+        return " / ".join(parts) or None
+    return det.get("text") or None
+
+
+def _slab_for(det: dict, qty: Optional[int]) -> Optional[dict]:
+    slabs = sorted(det.get("slabs") or [], key=lambda x: x.get("min_qty", 0))
+    if not slabs:
+        return None
+    if qty is None:
+        return slabs[-1]
+    hit = [s for s in slabs if qty >= (s.get("min_qty") or 0)]
+    return hit[-1] if hit else None
+
+
+def scheme_apply(pr: dict, ptr: float, qty: int) -> dict:
+    """Per-line effect of a scheme: net unit price + free units."""
+    det = scheme_detail(pr)
+    unit, free_qty = ptr, 0
+    if det:
+        t = det.get("type")
+        if t == "slab":
+            s = _slab_for(det, qty)
+            det = ({"type": "free", **s} if s and s.get("buy") else {"type": "percent", "pct": s.get("pct", 0)}) if s else None
+            t = det.get("type") if det else None
+        if t == "free" and det.get("buy"):
+            free_qty = (qty // int(det["buy"])) * int(det.get("free") or 0)
+        elif t == "percent":
+            unit = ptr * (1 - float(det.get("pct") or 0) / 100)
+        elif t == "rupee":
+            unit = max(0.0, ptr - float(det.get("amount") or 0))
+    return {"unit": round(unit, 2), "free_qty": free_qty}
+
+
+def effective_ptr(pr: dict, ptr: float) -> float:
+    """Best-case landed cost per unit after the scheme — used for margin ranking."""
+    det = scheme_detail(pr)
+    if not det:
+        return ptr
+    t = det.get("type")
+    if t == "slab":
+        s = _slab_for(det, None)
+        if not s:
+            return ptr
+        det = {"type": "free", **s} if s.get("buy") else {"type": "percent", "pct": s.get("pct", 0)}
+        t = det["type"]
+    if t == "free" and det.get("buy"):
+        b, f = int(det["buy"]), int(det.get("free") or 0)
+        return round(ptr * b / (b + f), 2) if b + f else ptr
+    if t == "percent":
+        return round(ptr * (1 - float(det.get("pct") or 0) / 100), 2)
+    if t == "rupee":
+        return round(max(0.0, ptr - float(det.get("amount") or 0)), 2)
+    return ptr
+
+
+# ============================================================================
+# DELIVERY ESTIMATE — distributor-defined localities + cut-off slots (no maps)
+# ============================================================================
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def delivery_estimate(d: dict, user: Optional[dict]) -> dict:
+    cfg = ((d or {}).get("settings") or {}).get("delivery") or {}
+    locs = [x.strip().lower() for x in (cfg.get("localities") or []) if x and x.strip()]
+    slots = sorted([s for s in (cfg.get("slots") or []) if s.get("cutoff")], key=lambda s: s["cutoff"])
+    if locs and user:
+        hay = " ".join(str(user.get(k) or "") for k in ("area", "address", "city", "pincode")).lower()
+        if not any(l in hay for l in locs):
+            return {"label": "Not in delivery area", "serviceable": False}
+    if not slots:
+        return {"label": (d or {}).get("delivery_time") or "Delivery in 24 hrs", "serviceable": True}
+    now = datetime.now(IST).strftime("%H:%M")
+    for s in slots:
+        if now < s["cutoff"]:
+            return {"label": f"Delivery by {s.get('window') or s['cutoff']}, Today", "serviceable": True, "cutoff": s["cutoff"]}
+    s = slots[0]
+    return {"label": f"Delivery by {s.get('window') or s['cutoff']}, Tomorrow", "serviceable": True, "cutoff": s["cutoff"]}
+
+
+
 async def user_credit_rows(user_id: str) -> List[dict]:
     return await db.customer_credit.find({"user_id": user_id}, {"_id": 0}).to_list(200)
 
@@ -3047,6 +3212,9 @@ async def distributor_order_action(
     elif action == "cancel":
         updates["cancelled_at"] = iso(now_utc())
     await db.orders.update_one({"id": order_id}, {"$set": updates})
+    await notify(f"Order {new_status}",
+                 f"{order.get('code')} from {d.get('short_name')} is now {new_status}" + (f" — {note}" if note else ""),
+                 user_id=order["user_id"], kind="order", link=f"/order/{order_id}")
     return {"success": True, "status": new_status}
 
 
@@ -3097,7 +3265,8 @@ async def distributor_inventory(
             "image_emoji": p.get("image_emoji", "💊"),
             "mrp": my_price.get("mrp", p.get("mrp")),
             "ptr": my_price.get("ptr", p.get("ptr")),
-            "scheme": my_price.get("scheme"),
+            "scheme": scheme_label(scheme_detail(my_price)),
+            "scheme_detail": scheme_detail(my_price),
             "margin_pct": my_price.get("margin_pct"),
             "qty_available": qty,
             "stock_status": "out" if qty == 0 else "low" if qty <= 20 else "in",
@@ -3115,6 +3284,7 @@ class InventoryUpdate(BaseModel):
     mrp: Optional[float] = None
     qty_available: Optional[int] = None
     scheme: Optional[str] = None
+    scheme_detail: Optional[dict] = None  # {type: free|percent|rupee|slab|custom|none, ...}
     dist_discount_pct: Optional[float] = None
     expiry: Optional[str] = None
 
@@ -3138,6 +3308,31 @@ async def distributor_inventory_update(
                 v = getattr(payload, k)
                 if v is not None:
                     pr[k] = v
+            if payload.scheme_detail is not None:
+                det = payload.scheme_detail or {}
+                if det.get("type") in (None, "", "none"):
+                    pr["scheme_detail"], pr["scheme"] = None, None
+                else:
+                    t = det["type"]
+                    if t not in ("free", "percent", "rupee", "slab", "custom"):
+                        raise HTTPException(400, "Invalid scheme type")
+                    try:
+                        if t == "free" and (int(det.get("buy") or 0) <= 0 or int(det.get("free") or 0) <= 0):
+                            raise ValueError("Enter buy and free quantity, e.g. 10 + 1")
+                        if t == "percent" and not (0 < float(det.get("pct") or 0) < 100):
+                            raise ValueError("Enter a discount % between 0 and 100")
+                        if t == "rupee" and float(det.get("amount") or 0) <= 0:
+                            raise ValueError("Enter the ₹ off per unit")
+                        if t == "custom" and not (det.get("text") or "").strip():
+                            raise ValueError("Describe the custom scheme")
+                        if t == "slab":
+                            sl = det.get("slabs") or []
+                            if not isinstance(sl, list) or not sl or any(not isinstance(x, dict) or int(x.get("min_qty") or 0) <= 0 or int(x.get("buy") or 0) <= 0 or int(x.get("free") or 0) <= 0 for x in sl):
+                                raise ValueError("Each slab needs from-qty, buy and free quantity")
+                    except (TypeError, ValueError, AttributeError) as ve:
+                        raise HTTPException(400, str(ve) if isinstance(ve, ValueError) and str(ve) and not str(ve).startswith("invalid") else "Invalid scheme values")
+                    pr["scheme_detail"] = det
+                    pr["scheme"] = scheme_label(det)
             # recompute margin if ptr or mrp changed
             try:
                 if pr.get("mrp") and pr.get("ptr"):
@@ -3167,8 +3362,16 @@ async def distributor_customers(
             "last_order_at": {"$max": "$created_at"},
         }},
     ]).to_list(500)
+    # Mapped pharmacies are customers even before their first order
+    maps = {m["user_id"]: m.get("status") for m in await db.mappings.find({"distributor_id": d["id"]}, {"_id": 0, "user_id": 1, "status": 1}).to_list(2000)}
+    have = {r["_id"] for r in agg}
+    for uid, st in maps.items():
+        if st == "mapped" and uid not in have:
+            agg.append({"_id": uid, "total_spent": 0, "orders": 0, "last_order_at": None})
     user_ids = [r["_id"] for r in agg]
-    users = {u["id"]: u for u in await db.users.find({"id": {"$in": user_ids}}, {"_id": 0}).to_list(500)}
+    users = {u["id"]: u for u in await db.users.find({"id": {"$in": user_ids}}, {"_id": 0}).to_list(2000)}
+    from retail_features import pharmacy_ratings  # noqa: E402
+    ratings = await pharmacy_ratings(user_ids, d["id"])
     # Outstanding per user (sum of pending payments to this distributor)
     pay_agg = await db.payments.aggregate([
         {"$match": {"distributor_id": d["id"], "status": {"$in": ["due", "overdue"]}}},
@@ -3203,6 +3406,8 @@ async def distributor_customers(
             "credit_used": c_used,
             "credit_available": round(c_lim - c_used, 2),
             "credit_used_pct": round((c_used / max(c_lim, 1)) * 100, 1),
+            "mapping_status": maps.get(r["_id"]) or "unmapped",
+            "rating": ratings.get(r["_id"]),
         })
     if q:
         qq = q.lower()
@@ -3463,6 +3668,8 @@ async def distributor_record_payment(pid: str, req: RecordPaymentReq, user: dict
             "due_date": p["due_date"], "status": "paid", "days_to_due": 0,
             "paid_at": iso(now_utc()), "pay_method": method,
         })
+    await notify("Payment recorded", f"{d.get('short_name')} recorded ₹{amt:,.0f} against {p.get('invoice_code')}" + (" (fully paid)" if fully else " (part payment)"),
+                 user_id=cust, kind="payment", link="/(tabs)/payments")
     return {"success": True, "collected": amt, "fully_paid": fully}
 
 
@@ -4227,6 +4434,8 @@ app.include_router(api_router)
 # Client-requested feature endpoints (imported after all helpers are defined)
 from client_features import feature_router  # noqa: E402
 app.include_router(feature_router)
+from retail_features import retail_router  # noqa: E402
+app.include_router(retail_router)
 
 # ERP data-sync (import/export) endpoints
 from sync_engine import sync_router, auto_sync_loop, ensure_sync_indexes  # noqa: E402
@@ -4246,6 +4455,8 @@ async def startup():
     await seed_database()
     await seed_distributor_demo()
     await seed_team_demo()
+    from retail_features import migrate_retail  # noqa: E402
+    await migrate_retail()
     import asyncio
 
     async def _bg_init():

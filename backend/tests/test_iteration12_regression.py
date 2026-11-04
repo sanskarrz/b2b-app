@@ -22,7 +22,7 @@ import openpyxl
 import pytest
 import requests
 
-BASE = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://pharmacy-b2b.preview.emergentagent.com").rstrip("/")
+BASE = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://distro-import--1znvr854.preview.emergentagent.com").rstrip("/")
 API = f"{BASE}/api"
 BACKEND_DIR = Path("/app/backend")
 SAMPLE_XLSX = BACKEND_DIR / "tests" / "sample_nn_stock_report.xlsx"

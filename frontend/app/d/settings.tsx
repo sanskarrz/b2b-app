@@ -1,5 +1,6 @@
 // Distributor settings — auto-accept (no overdue) + default cash discount
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Switch, TextInput } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Switch, TextInput, KeyboardAvoidingView, Platform } from "react-native";
+import { DeliverySlotsCard } from "@/src/components/DeliverySlotsCard";
 import { useState, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -55,7 +56,8 @@ export default function DistributorSettings() {
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 30 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+        <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 30 }} keyboardShouldPersistTaps="handled">
           <View style={styles.card}>
             <View style={styles.rowBetween}>
               <View style={{ flex: 1, paddingRight: 10 }}>
@@ -76,7 +78,9 @@ export default function DistributorSettings() {
               </TouchableOpacity>
             </View>
           </View>
+          <DeliverySlotsCard />
         </ScrollView>
+        </KeyboardAvoidingView>
       )}
     </SafeAreaView>
   );

@@ -25,6 +25,7 @@ export default function HomeScreen() {
   const [data, setData] = useState<any>(null);
   const [me, setMe] = useState<any>(null);
   const [cartCount, setCartCount] = useState(0);
+  const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const greetedRef = useRef(false);
@@ -38,12 +39,14 @@ export default function HomeScreen() {
 
   const load = async () => {
     try {
-      const [dash, cart, user] = await Promise.all([
+      const [dash, cart, user, notif] = await Promise.all([
         api("/dashboard"),
         api("/cart"),
         me ? Promise.resolve(me) : api("/auth/me"),
+        api("/notifications").catch(() => ({ unread: 0 })),
       ]);
       setData(dash);
+      setUnread(notif.unread || 0);
       setCartCount(cart.count || 0);
       if (!me) setMe(user);
     } catch (e: any) {
@@ -115,7 +118,7 @@ export default function HomeScreen() {
                 testID="home-notif"
               >
                 <Ionicons name="notifications-outline" size={20} color="#FFF" />
-                <View style={styles.heroBadge}><Text style={styles.heroBadgeText}>3</Text></View>
+                {unread > 0 && <View style={styles.heroBadge}><Text style={styles.heroBadgeText}>{unread > 9 ? "9+" : unread}</Text></View>}
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.heroIconBtn}
@@ -372,8 +375,8 @@ export default function HomeScreen() {
             </View>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               <ToolCard icon="trending-up" label="Smart Reorder" sub="AI-predicted refills" color={colors.success} onPress={() => router.push("/reorder-predictor")} />
-              <ToolCard icon="git-compare" label="Compare" sub="Find best vendor" color={colors.accent} onPress={() => router.push("/compare")} />
-              <ToolCard icon="bar-chart" label="Margin Analyzer" sub="Profit by category" color="#7C3AED" onPress={() => router.push("/analytics/margin")} />
+              <ToolCard icon="git-compare" label="Compare" sub="Product-wise margin" color={colors.accent} onPress={() => router.push("/compare")} />
+              <ToolCard icon="ribbon" label="Credit Rating" sub="Your payment score" color="#7C3AED" onPress={() => router.push("/credit-rating")} />
               <ToolCard icon="calculator" label="Margin Calc" sub="PTR ↔ MRP" color="#0EA5A4" onPress={() => router.push("/calculator")} />
               <ToolCard icon="bookmark" label="Templates" sub="Recurring carts" color={colors.warning} onPress={() => router.push("/templates")} />
               <ToolCard icon="calendar" label="Cash Flow" sub="60-day calendar" color={colors.primary} onPress={() => router.push("/cash-flow")} />

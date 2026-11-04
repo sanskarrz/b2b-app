@@ -7,6 +7,7 @@ import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import { api } from "@/src/api";
 import { showError, showSuccess } from "@/src/components/Toast";
 import { colors, radius, formatINRFull } from "@/src/theme";
+import { SchemeEditor, SchemeDet } from "@/src/components/SchemeEditor";
 
 const FILTERS = [
   { k: "", l: "All" },
@@ -22,6 +23,7 @@ export default function DistributorInventory() {
   const [query, setQuery] = useState("");
   const [only, setOnly] = useState<string>(params.only || "");
   const [editing, setEditing] = useState<any | null>(null);
+  const [schemeDet, setSchemeDet] = useState<SchemeDet>({ type: "none" });
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ ptr: "", mrp: "", qty_available: "", scheme: "", expiry: "", barcode: "" });
   const [adjQty, setAdjQty] = useState("");
@@ -67,6 +69,7 @@ export default function DistributorInventory() {
 
   const openEdit = (it: any) => {
     setEditing(it);
+    setSchemeDet(it.scheme_detail || { type: "none" });
     setAdjQty(""); setAdjReason("damage");
     setForm({
       ptr: String(it.ptr || ""),
@@ -122,7 +125,7 @@ export default function DistributorInventory() {
           ptr: form.ptr ? parseFloat(form.ptr) : null,
           mrp: form.mrp ? parseFloat(form.mrp) : null,
           qty_available: form.qty_available ? parseInt(form.qty_available, 10) : 0,
-          scheme: form.scheme || null,
+          scheme_detail: schemeDet,
           expiry: form.expiry || null,
         },
       });
@@ -178,7 +181,7 @@ export default function DistributorInventory() {
           renderItem={({ item: p }: any) => {
             const statusColor = p.stock_status === "out" ? colors.danger : p.stock_status === "low" ? colors.warning : colors.success;
             return (
-              <TouchableOpacity style={styles.row} onPress={() => openEdit(p)}>
+              <TouchableOpacity style={styles.row} onPress={() => openEdit(p)} testID={`inv-row-${p.product_id || p.id}`}>
                 <Text style={styles.emoji}>{p.image_emoji}</Text>
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={styles.pName} numberOfLines={1}>{p.name}</Text>
@@ -216,7 +219,7 @@ export default function DistributorInventory() {
               <Field label="Qty in stock" value={form.qty_available} onChange={(v) => setForm({ ...form, qty_available: v.replace(/\D/g, "") })} keyboardType="number-pad" />
               <Field label="Expiry (e.g., Jun 27)" value={form.expiry} onChange={(v) => setForm({ ...form, expiry: v })} />
             </View>
-            <Field label="Scheme (e.g., 10+1 Free)" value={form.scheme} onChange={(v) => setForm({ ...form, scheme: v })} />
+            <SchemeEditor value={schemeDet} onChange={setSchemeDet} />
 
             <Text style={[styles.fieldLabel, { marginTop: 8 }]}>Barcode</Text>
             <View style={{ flexDirection: "row", gap: 8 }}>
@@ -245,7 +248,7 @@ export default function DistributorInventory() {
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(null)}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.5 }]} onPress={save} disabled={saving}>
+              <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.5 }]} onPress={save} disabled={saving} testID="inv-save">
                 {saving ? <ActivityIndicator color="#FFF" /> : <><Ionicons name="checkmark" size={16} color="#FFF" /><Text style={styles.saveText}>Save Changes</Text></>}
               </TouchableOpacity>
             </View>

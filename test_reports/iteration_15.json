@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 15 — retailer change requirements. Backend: 20 pytest cases in /app/backend/tests/test_iteration15_retail.py covering mapping request/approve/reject/unmap (both sides), unmapped-only cash rule (credit order 400), credit_limit/credit_used flowing to cart + GET /distributors/{id} + distributor customer list, GPS distance sort/has_location, search tabs/distributor filter, compare sorts (margin/ptr/stock/delivery), all scheme types + cart free_qty/unit_price, notifications both portals, disputes new categories + unflag lifecycle, bills/returns flag validation, shortbook notes CRUD + note->query, ratings both sides + credit rating, delivery slots HH:MM validation, upload + file access (owner 200 / other pharmacy 404 / no token 401). 19/20 pass; 1 real bug: scheme_detail with missing value returns 500. Frontend (390x844, Playwright): pharmacy OTP text is black (rgb 0,0,0) on white; floating chat on Home/Vendors/More opens /chat; Vendors Mapped/Unmapped tabs, Map->Requested->Withdraw, Unmap blocked with outstanding; Search Pharmarack cards (scheme badge, PTR/MRP/pack/stock, margin, 'Delivery by 1-3 PM, Today'), Qty '+' adds to cart, sticky cart bar 'Last Added', distributor filter sheet filters correctly, Non-Mapped tab; Compare ranks offers by margin and adds to cart; Shortbook Notes composer (voice/photo buttons render) + Raise a Query with 5 categories submits; Returns bill search + multi-checkbox + Sellable/Issue + submit; My Queries Unflag after distributor resolve closes ticket; Notifications list; Credit Rating screen; More menu has no Margin Analyzer/Profit Report/GST Invoices/Reports. Distributor: bell -> /d/notifications, Customers 'Mapping Requests' tab approve with credit limit/days, customer detail rating stars + Unmap, Queries shows new categories + resolve, Order Settings GPS + localities + slots save, Stock edit modal scheme editor (none/free/%/₹/slab/custom). No deprecated Expo packages (expo-av/expo-barcode-scanner/expo-background-fetch) found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/distributor/me/inventory/{pid}", "issue": "scheme_detail {type:'percent'} without pct (or {type:'rupee'} without amount) -> 500 'TypeError: unsupported format string passed to NoneType.__format__' from server.py scheme_label() (f\"{det.get('pct'):g}\"). Validate required fields per type (free: buy>0, free>=0; percent: 0<pct<100; rupee: amount>0; slab: non-empty slabs with min_qty; custom: text) and return 400."},
+      {"endpoint": "POST /api/distributor/me/customers/{id}/unmap", "issue": "Distributor can unmap a pharmacy with outstanding credit_used (pharmacy-side unmap is blocked). Outstanding stays on customer_credit but is hidden from pharmacy mapped tab/cart (credit_used returned only when mapped). Confirm intended; at least warn the distributor."},
+      {"endpoint": "POST /api/distributor/me/customers/{id}/rating", "issue": "No relationship/existence check — a distributor can rate any user_id (even non-existent)."},
+      {"endpoint": "POST /api/retail/mappings", "issue": "No role check — distributor-role users can create mapping requests."},
+      {"endpoint": "POST /api/shortbook/notes/{id}/query", "issue": "Allows raising another query for a note that already has query_id (silently overwrites link)."},
+      {"endpoint": "GET /api/retail/search", "issue": "Products capped at 150 before splitting into mapped/unmapped -> counts/tabs truncated for broad queries."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Search header (app/search.tsx)", "issue": "Distributor filter chip (x 285-388) overlaps the scan button (x 334-378): 'All Distributor' text is clipped under the scan icon and tapping the right half of the chip hits scan.", "testID": "search-dist-filter / search-scan", "priority": "MEDIUM"},
+      {"component": "Returns search row (app/returns.tsx:99-100)", "issue": "'Bill number' TextInput overflows past the right screen edge on 390px width (RN-web TextInput intrinsic width). Add minWidth: 0 / width: 0 with flex.", "testID": "ret-bill", "priority": "MEDIUM"},
+      {"component": "My Queries (app/disputes.tsx:69)", "issue": "Unflag button requires d.flagged; legacy disputes without the flagged field (e.g. DSP-82214 RESOLVED) never show Unflag although backend allows it.", "testID": "unflag-*", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Vendors (Unmapped)", "issues": ["Floating chat FAB covers the Map button of the last visible card — add list paddingBottom (~90)", "Distributors with no location show '—' and no distance; unmapped list cluttered by ~70 test distributors"]},
+      {"screen": "Vendors unmap blocked", "issues": ["Business-rule 400 shown under toast title 'Something went wrong'; confirm dialog is shown before the outstanding check — pre-check credit_used and show a clear message", "Toasts overlay the Mapped/Unmapped tab header"]},
+      {"screen": "Distributor customer detail", "issues": ["Credit rating card is rendered above the customer profile header (odd hierarchy)"]},
+      {"screen": "Distributor Stock edit modal", "issues": ["Expiry input value truncated ('Aug 202…')"]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration15_retail.py", "/app/backend/tests/helper_iter15_seed_request.py", "/app/test_reports/pytest/iteration15.xml"],
+  "action_items": [
+    "Add per-type validation for scheme_detail in PATCH /distributor/me/inventory/{pid} (and make scheme_label None-safe) to return 400 instead of 500",
+    "Fix search header layout so distributor chip and scan button don't overlap",
+    "Fix Returns 'Bill number' input overflow (minWidth:0)",
+    "Show Unflag for resolved/rejected disputes even if legacy doc lacks flagged (use d.flagged !== false)",
+    "Add bottom padding on Vendors list so FAB doesn't cover Map buttons; show friendly message for unmap-blocked",
+    "Decide/guard distributor-side unmap when credit outstanding; add relationship check on distributor rating; role check on mapping request"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 4463 lines, retail_features.py 810, client_features.py 794 — exceed 700-line guideline; split modules",
+    "retail_features.py:704 STORAGE_BASE has a hardcoded default URL fallback (should come from env only)",
+    "POST /api/cart/items has no qty>0 / product existence validation (pre-existing)",
+    "pharmacy_ratings loads up to 50k payments into memory and filters per user in Python (O(n*m)); fine now, slow at scale"
+  ],
+  "updated_files": ["/app/frontend/app/d/inventory.tsx (added testID inv-row-*, inv-save)", "/app/frontend/app/d/customers.tsx (added testID cust-card-*)", "/app/backend/tests/test_iteration15_retail.py (new)", "/app/backend/tests/helper_iter15_seed_request.py (new)"],
+  "success_rate": {"backend": "95% (19/20)", "frontend": "~95% — all requested flows functional; 3 layout bugs"},
+  "seed_data_creation": "Created TEST_ pharmacies (test_*@example.com, test_ui_*@example.com) with mappings/orders/disputes/notes/ratings on dist-1 (approved then unmapped). On demo@rxtech.com created TEST_ note + 2 TEST_UI disputes (DSP-22784 now closed, DSP-74738 open) + 1 returns record. Demo cart restored to original (184.20). NOTE: my UI script accidentally unmapped demo from dist-3 (XYZ Pharma) — restored mapping status to 'mapped' directly in DB; a 'Pharmacy unmapped' notification was sent to dist-3 as a side effect. Inventory scheme on the tested dist-1 product was reset via type none + original scheme string re-applied.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "POST /api/auth/register needs {account_type:'pharmacy', name, email, phone, business_name} (not role/shop_name). GET /api/distributors/{id} nests credit under ['distributor']. web confirm dialogs (window.confirm) are used for Unmap/Withdraw — auto-accept dialogs and do NOT click extra 'Unmap' text (it hits another vendor's button). Run: EXPO_PUBLIC_BACKEND_URL=... pytest tests/test_iteration15_retail.py (~20 tests).",
+  "rca_of_issue": "Scheme 500: server.py scheme_label() formats det.get('pct')/det.get('amount') with :g; when value missing -> None.__format__ TypeError; inventory PATCH only validates type, not fields."
+}

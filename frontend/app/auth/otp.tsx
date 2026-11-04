@@ -156,6 +156,9 @@ export default function OtpScreen() {
                 keyboardType="number-pad"
                 maxLength={6}
                 autoFocus={i === 0}
+                textContentType={i === 0 ? "oneTimeCode" : "none"}
+                autoComplete={i === 0 ? "sms-otp" : "off"}
+                selectionColor="#000"
                 testID={`otp-input-${i}`}
               />
             ))}
@@ -226,10 +229,10 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 22,
     fontWeight: "700",
-    color: colors.text,
-    backgroundColor: colors.surface,
+    color: "#000000",
+    backgroundColor: "#FFFFFF",
   },
-  otpBoxFilled: { borderColor: colors.text, backgroundColor: colors.bg },
+  otpBoxFilled: { borderColor: colors.text, backgroundColor: "#FFFFFF" },
   otpBoxError: { borderColor: colors.danger, backgroundColor: colors.dangerBg + "40" },
   errorRow: {
     flexDirection: "row",

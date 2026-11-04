@@ -3,13 +3,17 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput,
 import { useState, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { api } from "@/src/api";
 import { showError } from "@/src/components/Toast";
+import { MappingRequests } from "@/src/components/MappingRequests";
+import { GradePill } from "@/src/components/Ratings";
 import { colors, radius, formatINRFull } from "@/src/theme";
 
 export default function DistributorCustomers() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const [tab, setTab] = useState<"customers" | "requests">(params.tab === "requests" ? "requests" : "customers");
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -38,6 +42,16 @@ export default function DistributorCustomers() {
         <Text style={styles.title}>Customers</Text>
         <Text style={styles.sub}>{items.length} pharmacies</Text>
       </View>
+      <View style={{ flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border }}>
+        {(["customers", "requests"] as const).map((t) => (
+          <TouchableOpacity key={t} onPress={() => setTab(t)} testID={`cust-tab-${t}`}
+            style={{ flex: 1, alignItems: "center", paddingVertical: 12, borderBottomWidth: 3, borderBottomColor: tab === t ? colors.primary : "transparent" }}>
+            <Text style={{ fontWeight: "800", color: tab === t ? colors.text : colors.textSecondary }}>{t === "customers" ? "Customers" : "Mapping Requests"}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {tab === "requests" && <MappingRequests onChanged={load} />}
+      {tab === "customers" && (<>
 
       <View style={styles.kpiRow}>
         <View style={styles.kpiBox}>
@@ -62,7 +76,7 @@ export default function DistributorCustomers() {
           data={items}
           keyExtractor={(c) => c.user_id}
           renderItem={({ item: c }: any) => (
-            <TouchableOpacity style={styles.card} activeOpacity={0.7} onPress={() => router.push(`/d/customer/${c.user_id}`)}>
+            <TouchableOpacity style={styles.card} activeOpacity={0.7} onPress={() => router.push(`/d/customer/${c.user_id}`)} testID={`cust-card-${c.user_id}`}>
               <View style={styles.cardHead}>
                 <View style={styles.avatar}>
                   <Text style={styles.avatarText}>{(c.name || "?")[0]?.toUpperCase()}</Text>
@@ -78,6 +92,7 @@ export default function DistributorCustomers() {
                     <Text style={styles.overdueText}>{c.overdue_count} OVERDUE</Text>
                   </View>
                 )}
+                <GradePill grade={c.rating?.grade} score={c.rating?.score} />
               </View>
 
               <View style={styles.metaGrid}>
@@ -117,6 +132,7 @@ export default function DistributorCustomers() {
           contentContainerStyle={{ padding: 12, paddingBottom: 30 }}
         />
       )}
+      </>)}
     </SafeAreaView>
   );
 }
