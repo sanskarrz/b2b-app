@@ -556,7 +556,11 @@ async def process_import(content: bytes, filename: str, did: str) -> dict:
             "No Item / Party / Ledger data was recognized in this file. Make sure you exported one of "
             "these masters (with a header row) to CSV/Excel from your billing software.",
         )
-    return {"summary": summary, "sheets": sheets_info, "total_rows": total, **stock}
+    match = {}
+    if summary["party"]["found"] or summary["ledger"]["found"]:
+        from distributor_ops import match_parties  # noqa: E402
+        match = await match_parties(did)
+    return {"summary": summary, "sheets": sheets_info, "total_rows": total, **stock, "parties_matched": match.get("matched", 0)}
 
 
 # ============================================================

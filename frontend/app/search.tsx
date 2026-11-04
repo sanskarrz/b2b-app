@@ -127,8 +127,8 @@ export default function Search() {
         </View>
         <View style={styles.infoRow}>
           <Text style={styles.margin}>Margin {r.margin_pct}%</Text>
-          <Text style={[styles.eta, !r.delivery?.serviceable && { color: colors.danger }]} numberOfLines={1}>
-            <Ionicons name="bicycle-outline" size={11} /> {r.delivery?.label}
+          <Text style={[styles.eta, !r.delivery?.serviceable && { color: colors.danger }]} numberOfLines={2}>
+            <Ionicons name="bicycle-outline" size={11} /> {r.delivery?.label}{r.delivery?.updated_label ? ` · ${r.delivery.updated_label}` : ""}
           </Text>
         </View>
         <View style={styles.cardFoot}>

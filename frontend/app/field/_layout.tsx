@@ -29,6 +29,7 @@ export default function FieldLayout() {
   const insets = useSafeAreaInsets();
   const screens = [
     <Tabs.Screen key="home" name="home" options={{ tabBarIcon: ({ focused }) => <Tab name="Pipeline" icon="funnel" focused={focused} /> }} />,
+    <Tabs.Screen key="collect" name="collect" options={{ tabBarIcon: ({ focused }) => <Tab name="Collect" icon="cash" focused={focused} /> }} />,
     <Tabs.Screen key="chat" name="chat" options={{ tabBarIcon: ({ focused }) => <Tab name="Chat" icon="chatbubbles" focused={focused} /> }} />,
     <Tabs.Screen key="profile" name="profile" options={{ tabBarIcon: ({ focused }) => <Tab name="Profile" icon="person" focused={focused} /> }} />,
     <Tabs.Screen key="on" name="order-new" options={{ href: null }} />,

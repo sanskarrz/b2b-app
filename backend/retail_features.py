@@ -546,6 +546,9 @@ class Slot(BaseModel):
 class DeliveryCfgReq(BaseModel):
     localities: List[str] = []
     slots: List[Slot] = []
+    manual_date: Optional[str] = None  # YYYY-MM-DD (IST) — manually set next delivery
+    manual_time: Optional[str] = None  # HH:MM 24h
+    manual_note: Optional[str] = None
 
 
 @retail_router.get("/distributor/me/delivery-slots")
@@ -553,6 +556,7 @@ async def get_delivery_cfg(user: dict = Depends(get_current_user)):
     d = await get_owned_distributor(user)
     cfg = (d.get("settings") or {}).get("delivery") or {}
     return {"localities": cfg.get("localities") or [], "slots": cfg.get("slots") or [],
+            "manual_at": cfg.get("manual_at"), "manual_note": cfg.get("manual_note"), "updated_at": cfg.get("updated_at"),
             "lat": d.get("lat"), "lng": d.get("lng"), "area": d.get("area")}
 
 
@@ -567,8 +571,18 @@ async def put_delivery_cfg(req: DeliveryCfgReq, user: dict = Depends(get_current
             raise HTTPException(400, "Each slot needs a delivery time")
     locs = sorted({x.strip() for x in req.localities if x and x.strip()}, key=str.lower)
     slots = sorted([{"cutoff": s.cutoff, "window": s.window.strip()} for s in req.slots], key=lambda s: s["cutoff"])
-    await db.distributors.update_one({"id": d["id"]}, {"$set": {"settings.delivery": {"localities": locs, "slots": slots}}})
-    return {"success": True, "localities": locs, "slots": slots}
+    manual_at = None
+    if req.manual_date and req.manual_time:
+        from server import IST
+        from datetime import datetime as _dt
+        try:
+            manual_at = _dt.strptime(f"{req.manual_date} {req.manual_time}", "%Y-%m-%d %H:%M").replace(tzinfo=IST).isoformat()
+        except ValueError:
+            raise HTTPException(400, "Manual delivery date/time must be YYYY-MM-DD and HH:MM")
+    cfg = {"localities": locs, "slots": slots, "manual_at": manual_at, "manual_note": (req.manual_note or "").strip() or None,
+           "updated_at": iso(now_utc())}
+    await db.distributors.update_one({"id": d["id"]}, {"$set": {"settings.delivery": cfg}})
+    return {"success": True, **cfg}
 
 
 # ============================================================

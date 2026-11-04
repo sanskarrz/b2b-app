@@ -128,7 +128,7 @@ export default function Compare() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.dName} numberOfLines={1}>{o.distributor_name}{o.distributor_area ? `, ${o.distributor_area}` : ""}</Text>
                       <Text style={[styles.eta, !o.delivery?.serviceable && { color: colors.danger }]}>
-                        <Ionicons name="bicycle-outline" size={12} /> {o.delivery?.label}{o.distance_km != null ? ` · ${o.distance_km} km` : ""}
+                        <Ionicons name="bicycle-outline" size={12} /> {o.delivery?.label}{o.distance_km != null ? ` · ${o.distance_km} km` : ""}{o.delivery?.updated_label ? `\n${o.delivery.updated_label}` : ""}
                       </Text>
                       {!o.mapped && <Text style={styles.unmapped}>Not mapped · cash / advance only</Text>}
                     </View>

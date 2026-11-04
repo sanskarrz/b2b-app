@@ -232,3 +232,15 @@ Backend: new `retail_features.py` (`retail_router`) + helpers in `server.py` (`n
 - **Shortbook notes** (text / voice→text + audio saved / photo) + Raise a Query; **Returns**: bill search, checkbox multi-select, Sellable/Issue pre-picked from payment state; **Flag/Unflag** tickets (raiser unflags only after resolved).
 - Uploads via Emergent Object Storage (`/uploads`, `/files/{id}?token=`), STT via `gpt-4o-mini-transcribe` (`/transcribe`).
 - Removed retailer Margin Analyzer, Profit Report, GST Invoices, Reports & Analytics. Floating chat button on pharmacy tabs. OTP inputs forced black on white; app forced light mode.
+
+## Distributor panel changes (client doc #2) — Jun 2026
+New `backend/distributor_ops.py` (`ops_router`):
+- Payment activity per bill (Received / Partially Received / Pending, due/received/balance/date/mode) → Money → Payments tab.
+- Statement rebuilt bill-wise: Outstanding = Bill Due + credit orders not yet billed = credit_used (one-time reconcile migration `credit_reconcile_v1`). Legacy route renamed `/statement-legacy`.
+- Owner `ops_roles` (field_sales/delivery) — require_role honours them; switch from More → My operational roles; "Back to Owner panel" in staff profile.
+- Set Parties: staff `areas` + `party_ids`; field customers filtered; collections enforced.
+- Field collections: salesperson submits (`/field/collections`), distributor approves (smart allocation: chosen bills → exact amount → oldest) via existing record-payment, or rejects; salesperson notified. Day-wise statement.
+- Imported parties/ledger auto-matched (GST→phone→name), manual link, exceptions; customer "From your system" card.
+- Manual next-delivery timestamp + "Updated" label shown in search/compare.
+- ERP section & barcode UI removed. Pharmacy online pay now reduces credit_used + notifies distributor.
+- Demo logins table in test_credentials.md.

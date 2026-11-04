@@ -29,7 +29,6 @@ export default function DistributorInventory() {
   const [adjQty, setAdjQty] = useState("");
   const [adjReason, setAdjReason] = useState("damage");
   const [adjBusy, setAdjBusy] = useState(false);
-  const [barcodeBusy, setBarcodeBusy] = useState(false);
 
   const PAGE = 200;
   const [more, setMore] = useState(false);
@@ -81,25 +80,6 @@ export default function DistributorInventory() {
     });
   };
 
-  const autoBarcode = async () => {
-    setBarcodeBusy(true);
-    try {
-      const r = await api("/distributor/me/inventory/auto-barcode", { method: "POST" });
-      showSuccess(r.assigned > 0 ? `Assigned ${r.assigned} barcodes` : "All products already have barcodes");
-      await load();
-    } catch (e: any) { showError(e?.message || "Failed"); }
-    finally { setBarcodeBusy(false); }
-  };
-
-  const saveBarcode = async () => {
-    if (!editing || !form.barcode.trim()) return;
-    try {
-      await api(`/distributor/me/inventory/${editing.product_id}/barcode`, { method: "POST", body: { barcode: form.barcode.trim() } });
-      showSuccess("Barcode saved");
-      await load();
-    } catch (e: any) { showError(e?.message || "Failed"); }
-  };
-
   const adjustStock = async () => {
     if (!editing) return;
     const n = parseInt(adjQty, 10);
@@ -146,9 +126,6 @@ export default function DistributorInventory() {
           <Text style={styles.title}>Inventory</Text>
           <Text style={styles.sub}>{items.length}{atEnd ? "" : "+"} SKUs</Text>
         </View>
-        <TouchableOpacity style={[styles.barcodeBtn, barcodeBusy && { opacity: 0.5 }]} onPress={autoBarcode} disabled={barcodeBusy} testID="auto-barcode-btn">
-          {barcodeBusy ? <ActivityIndicator color={colors.primary} size="small" /> : <><Ionicons name="barcode-outline" size={16} color={colors.primary} /><Text style={styles.barcodeBtnText}>Auto barcodes</Text></>}
-        </TouchableOpacity>
       </View>
 
       <View style={styles.searchWrap}>
@@ -220,12 +197,6 @@ export default function DistributorInventory() {
               <Field label="Expiry (e.g., Jun 27)" value={form.expiry} onChange={(v) => setForm({ ...form, expiry: v })} />
             </View>
             <SchemeEditor value={schemeDet} onChange={setSchemeDet} />
-
-            <Text style={[styles.fieldLabel, { marginTop: 8 }]}>Barcode</Text>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <TextInput value={form.barcode} onChangeText={(v) => setForm({ ...form, barcode: v.replace(/\s/g, "") })} placeholder="Scan or type barcode" placeholderTextColor={colors.textTertiary} style={[styles.input, { flex: 1 }]} testID="barcode-input" />
-              <TouchableOpacity style={styles.barcodeSave} onPress={saveBarcode} testID="save-barcode"><Text style={styles.barcodeSaveText}>Save</Text></TouchableOpacity>
-            </View>
 
             <View style={styles.adjBox}>
               <Text style={styles.adjTitle}>Adjust stock — damage / expiry</Text>

@@ -10,6 +10,7 @@ import { api } from "@/src/api";
 import { showError, showSuccess, showInfo } from "@/src/components/Toast";
 import { confirm } from "@/src/components/confirm";
 import { colors, radius } from "@/src/theme";
+import { SyncMatching } from "@/src/components/SyncMatching";
 
 function timeAgo(iso?: string) {
   if (!iso) return "never";
@@ -195,6 +196,7 @@ export default function DataSync() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+        <SyncMatching />
         <View style={styles.banner}>
           <Ionicons name="sync-outline" size={18} color={colors.info} />
           <Text style={styles.bannerText}>No API for your billing software? Upload its daily backup export (Excel/CSV) here — we auto-read it and remove duplicates. Then export your app orders to import back into your system.</Text>

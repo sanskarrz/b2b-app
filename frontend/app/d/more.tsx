@@ -1,9 +1,10 @@
-// Distributor More — ERP integration (API keys), profile, sign-out
+// Distributor More — team & operations, owner roles, profile, sign-out
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput, Modal, Pressable, Platform } from "react-native";
 import { useState, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
+import { OwnerRolesCard } from "@/src/components/OwnerRolesCard";
 import { api, clearToken } from "@/src/api";
 import { showError, showSuccess, showInfo } from "@/src/components/Toast";
 import { confirm } from "@/src/components/confirm";
@@ -138,83 +139,7 @@ export default function DistributorMore() {
           </TouchableOpacity>
         </View>
 
-        {/* ERP Integration — owner only */}
-        {isOwner && (
-        <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>ERP Integration</Text>
-            <TouchableOpacity style={styles.addBtn} onPress={() => setShowCreate(true)} testID="add-api-key">
-              <Ionicons name="add" size={14} color="#FFF" />
-              <Text style={styles.addBtnText}>New API Key</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.sectionSub}>Connect your existing ERP / back-office to push inventory updates and pull orders automatically.</Text>
-
-          <TouchableOpacity style={styles.docsRow} onPress={() => setDocsOpen(true)}>
-            <Ionicons name="book-outline" size={16} color={colors.info} />
-            <Text style={styles.docsText}>View API documentation & sample curls</Text>
-            <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
-          </TouchableOpacity>
-
-          {newKey && (
-            <View style={styles.newKeyBox}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                <Ionicons name="shield-checkmark" size={14} color={colors.success} />
-                <Text style={styles.newKeyLabel}>Save this key now — you won&apos;t see it again</Text>
-              </View>
-              <Text selectable style={styles.newKeyText}>{newKey.key}</Text>
-              <View style={{ flexDirection: "row", gap: 6, marginTop: 8 }}>
-                <TouchableOpacity
-                  style={styles.copyBtn}
-                  onPress={() => {
-                    if (Platform.OS === "web" && (navigator as any).clipboard) {
-                      (navigator as any).clipboard.writeText(newKey.key);
-                      showSuccess("Copied to clipboard");
-                    } else {
-                      showInfo("Long-press the key to copy");
-                    }
-                  }}
-                >
-                  <Ionicons name="copy-outline" size={13} color="#FFF" />
-                  <Text style={styles.copyText}>Copy</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.dismissBtn} onPress={() => setNewKey(null)}>
-                  <Text style={styles.dismissText}>I&apos;ve saved it</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
-          {loading ? (
-            <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
-          ) : keys.length === 0 ? (
-            <View style={styles.empty}>
-              <Ionicons name="key-outline" size={32} color={colors.textTertiary} />
-              <Text style={styles.emptyText}>No API keys yet</Text>
-              <Text style={styles.emptySub}>Generate one to start integrating your ERP.</Text>
-            </View>
-          ) : (
-            keys.map((k: any) => (
-              <View key={k.id} style={[styles.keyRow, !k.active && { opacity: 0.5 }]}>
-                <View style={[styles.keyIcon, !k.active && { backgroundColor: colors.dangerBg }]}>
-                  <Ionicons name={k.active ? "key" : "close-circle"} size={14} color={k.active ? colors.primary : colors.danger} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.keyLabel}>{k.label}</Text>
-                  <Text style={styles.keyPrefix}>{k.key_prefix} • Created {new Date(k.created_at).toLocaleDateString()}</Text>
-                  {k.last_used_at && <Text style={styles.keyMeta}>Last used {new Date(k.last_used_at).toLocaleString()}</Text>}
-                  {!k.active && <Text style={[styles.keyMeta, { color: colors.danger }]}>REVOKED</Text>}
-                </View>
-                {k.active && (
-                  <TouchableOpacity onPress={() => revoke(k.id, k.label)} style={styles.revokeBtn}>
-                    <Ionicons name="trash-outline" size={15} color={colors.danger} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            ))
-          )}
-        </View>
-        )}
+        {isOwner && <OwnerRolesCard />}
 
         {/* Profile/Sign out */}
         <View style={styles.section}>
@@ -231,89 +156,7 @@ export default function DistributorMore() {
         </View>
       </ScrollView>
 
-      {/* Create modal */}
-      <Modal visible={showCreate} transparent animationType="slide" onRequestClose={() => setShowCreate(false)}>
-        <Pressable style={styles.modalBg} onPress={() => setShowCreate(false)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Generate new API key</Text>
-            <Text style={styles.modalSub}>Give it a descriptive name like &quot;Tally Integration&quot; or &quot;Marg ERP&quot;.</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={label}
-              onChangeText={setLabel}
-              placeholder="ERP integration name"
-              placeholderTextColor={colors.textTertiary}
-              autoFocus
-              maxLength={50}
-            />
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowCreate(false)}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.saveBtn, creating && { opacity: 0.5 }]} onPress={create} disabled={creating}>
-                {creating ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveText}>Generate</Text>}
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
 
-      {/* Docs modal */}
-      <Modal visible={docsOpen} transparent animationType="slide" onRequestClose={() => setDocsOpen(false)}>
-        <Pressable style={styles.modalBg} onPress={() => setDocsOpen(false)}>
-          <Pressable style={[styles.modalCard, { maxHeight: "85%" }]} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.modalHandle} />
-            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
-              <Text style={styles.modalTitle}>RX Tech ERP API</Text>
-              <View style={{ flex: 1 }} />
-              <TouchableOpacity onPress={() => setDocsOpen(false)}>
-                <Ionicons name="close" size={20} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={{ marginTop: 6 }} contentContainerStyle={{ paddingBottom: 30 }}>
-              <Text style={styles.docHelp}>All endpoints require the <Text style={styles.code}>X-API-Key</Text> header with your generated key. Base URL:</Text>
-              <View style={styles.codeBlock}><Text selectable style={styles.codeText}>{BACKEND}/api</Text></View>
-
-              <DocEndpoint
-                method="GET"
-                path="/erp/v1/me"
-                desc="Sanity check — returns your distributor info."
-                curl={`curl -H "X-API-Key: <KEY>" ${BACKEND}/api/erp/v1/me`}
-              />
-              <DocEndpoint
-                method="GET"
-                path="/erp/v1/orders"
-                desc="List incoming orders (filter by status / since ISO timestamp)."
-                curl={`curl -H "X-API-Key: <KEY>" \\\n  "${BACKEND}/api/erp/v1/orders?status=placed&limit=50"`}
-              />
-              <DocEndpoint
-                method="POST"
-                path="/erp/v1/orders/{id}/dispatch"
-                desc="Mark an order as dispatched after picking/packing in your ERP."
-                curl={`curl -X POST -H "X-API-Key: <KEY>" -H "Content-Type: application/json" \\\n  -d '{"note":"AWB#1234"}' \\\n  ${BACKEND}/api/erp/v1/orders/ord-123/dispatch`}
-              />
-              <DocEndpoint
-                method="GET"
-                path="/erp/v1/inventory"
-                desc="Read your current stock levels and prices from RX Tech."
-                curl={`curl -H "X-API-Key: <KEY>" ${BACKEND}/api/erp/v1/inventory`}
-              />
-              <DocEndpoint
-                method="POST"
-                path="/erp/v1/inventory/bulk-update"
-                desc="Sync stock + prices in bulk. Pass an array of product updates."
-                curl={`curl -X POST -H "X-API-Key: <KEY>" -H "Content-Type: application/json" \\\n  -d '[{"product_id":"p-1","qty_available":150,"ptr":52.5}]' \\\n  ${BACKEND}/api/erp/v1/inventory/bulk-update`}
-              />
-
-              <View style={styles.tipBox}>
-                <Ionicons name="bulb" size={14} color={colors.warning} />
-                <Text style={styles.tipText}>Schedule a cron in your ERP to call bulk-update every 15 min for live stock sync. Pull /orders every 5 min to capture new orders.</Text>
-              </View>
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </SafeAreaView>
   );
 }

@@ -90,11 +90,19 @@ function buildHtml(s: any): string {
     </div>
 
     <div class="kpis">
-      <div class="kpi"><div class="k">Total Billed</div><div class="v">${inr(sm.total_billed)}</div></div>
-      <div class="kpi"><div class="k">Total Credited</div><div class="v" style="color:#16A34A">${inr(sm.total_credited)}</div></div>
+      <div class="kpi"><div class="k">Bill Due</div><div class="v" style="color:#DC2626">${inr(sm.bills_due ?? sm.outstanding)}</div></div>
+      <div class="kpi"><div class="k">Orders not yet billed</div><div class="v">${inr(sm.unbilled_orders || 0)}</div></div>
       <div class="kpi"><div class="k">Outstanding</div><div class="v" style="color:#DC2626">${inr(sm.outstanding)}</div></div>
       <div class="kpi"><div class="k">Overdue</div><div class="v" style="color:#DC2626">${inr(sm.overdue)}</div></div>
     </div>
+    <div class="muted" style="margin-top:6px">Outstanding = Bill Due ${inr(sm.bills_due ?? sm.outstanding)} + Orders not yet billed ${inr(sm.unbilled_orders || 0)} · Total billed ${inr(sm.total_billed)} · Payments received ${inr(sm.total_credited)}</div>
+
+    <h1>Bill-wise dues (${(s.bills || []).length})</h1>
+    <table>
+      <thead><tr><th>Bill</th><th>Date</th><th class="num">Bill Amount</th><th class="num">Received</th><th class="num">Balance Due</th></tr></thead>
+      <tbody>${(s.bills || []).map((b: any) => `<tr><td><div class="ref">${b.bill_number}</div><div class="lbl">${b.state === "received" ? "Paid" : b.state === "partial" ? "Part paid" : "Pending"}${b.overdue ? " · Overdue" : ""}</div></td><td>${fmtDate(b.date)}</td><td class="num">${inr(b.amount)}</td><td class="num credit">${inr(b.received)}</td><td class="num ${b.balance > 0 ? "due" : "ok"}">${inr(b.balance)}</td></tr>`).join("") || '<tr><td colspan="5" style="text-align:center;color:#B0A28C">No bills</td></tr>'}
+      ${(s.unbilled || []).map((u: any) => `<tr><td><div class="ref">${u.code}</div><div class="lbl">Order not yet billed (${u.status})</div></td><td>${fmtDate(u.date)}</td><td class="num">${inr(u.amount)}</td><td class="num">—</td><td class="num due">${inr(u.amount)}</td></tr>`).join("")}</tbody>
+    </table>
 
     <h1>Ledger (${sm.entry_count || 0} entries)</h1>
     <table>

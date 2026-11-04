@@ -1,0 +1,51 @@
+{
+  "summary": "Tested the 10 distributor-panel changes on both backend and frontend. Backend: wrote test_iteration17_distributor_ops.py with 22 tests, and all 22 pass. They cover payment activity, statement reconciliation for cust-1..4, field collections (validation, chosen-bill allocation, approve/reject, double-approve blocked, day-wise statement, a unit test of _allocate for exact-amount then oldest-first), owner ops roles (field/delivery access, owner listed as delivery staff, order assign, reset to []), Set Parties filtering, matching/link/system-data, party CSV import returning parties_matched, manual delivery ETA in /retail/search with the Updated label plus a 400 on an invalid date, and pharmacy pay reducing credit_used and notifying the distributor. Frontend checked on a 375px mobile viewport: owner Money tab (Receivables/Payments/Field Collections, approve, Day-wise statement), More (no ERP section; operational-role toggles; Open → /delivery/home; Back to Owner panel → /d/home), Stock edit modal (no barcode field), Team Set Parties modal, customer 'From your system (imported)' card with its 3 tabs, Data Sync Retailer matching Link/Unlink, Order Settings manual next-delivery time → retailer search shows 'Delivery by 11:45 AM, Tomorrow · Updated …'. Also checked sales@rxtech.com Collect tab: pick party, tick bill, amount, UPI without a reference → error toast, add the reference → submit → shows PENDING APPROVAL in My collections. No red screens and no deprecated packages (no expo-av, expo-barcode-scanner or expo-background-fetch). SafeAreaView comes from react-native-safe-area-context.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/field/collections", "issue": "The amount check compares against open bills only, plus any one submission. (a) Several pending collections can each be up to the full due: two collections of the full ₹12,575 were both accepted. (b) Unbilled credit orders are excluded, but the Collect list shows 'Due' = credit_used, which includes them. Example: Wellness shows Due ₹16,868 while open bills are ₹12,575, so a salesperson collecting the shown due gets a 400."},
+      {"endpoint": "GET /api/field/customers/{id}/bills & POST /api/field/collections", "issue": "Neither checks Set Parties. sales@rxtech.com can read bills for cust-3 and submit a collection for it, even though cust-3 is outside their areas and is hidden from /field/customers."},
+      {"endpoint": "distributor_ops._field_user / require_role on /field/*", "issue": "_field_user always allows the owner (`or r == 'owner'`), and /field/customers allows the owner without ops_roles. So the field_sales ops role only controls the UI, not access. Delivery endpoints are gated correctly (403 after the role is reset)."},
+      {"endpoint": "POST /api/distributor/me/field-collections/{id}/approve", "issue": "(a) Not atomic. The status is read and then bills are settled before the status is flipped. A 3-way concurrent test happened to pass, but it should use find_one_and_update(status pending_approval → approving) first. (b) The collected_by tagging uses update_many on every payment of that customer with paid_at >= collected_at. A pharmacy online payment made between collection and approval would be wrongly tagged with the salesperson. Tag by the payment ids created in the loop instead. (c) No notification to the salesperson on approve or reject."},
+      {"endpoint": "GET /api/distributor/me/staff/{id}/parties", "issue": "Looks up staff_id without filtering by distributor, unlike PATCH. It would expose another distributor's staff areas/party_ids."},
+      {"endpoint": "GET /api/distributor/me/sync/matching, /customers/{id}/system-data", "issue": "Each GET re-runs match_parties, which does one update_one per party, plus a full scan of dist_ledger. This will be slow with real imports (thousands of parties)."},
+      {"endpoint": "Seed data cust-1..4", "issue": "area and address disagree, e.g. cust-1 area 'Bhandup' but address 'Andheri West'; cust-2 'Mulund' vs 'Bandra East'. Because parties match on area OR address, these retailers show for both Bhandup and Andheri staff."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Team → Set Parties modal (app/d/team.tsx:44 inArea)", "issue": "The 'Retailers (N visible)' count and the implied in-area ticks use only c.area. Backend GET parties returns area = u.area || u.address, and the backend filter matches area+address+city+pincode. With fs-1 areas 'Andheri, Bandra' the modal says '0 visible', but sales actually sees Apollo and Wellness, whose addresses are Andheri West and Bandra East. Use the backend's in_area flag (already returned) instead of recomputing.", "testID": "parties-areas", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Field Collect → amount", "issue": "The party card shows 'Due ₹X' from credit_used (includes unbilled orders), but validation allows only the open-bill total, so the user gets a confusing 400. Show the open-bill due or align the backend.", "affected_testIDs": ["col-cust-cust-2", "col-amount", "col-submit"]}
+    ],
+    "design_issues": [
+      {"screen": "Retailer search card (app/search.tsx)", "issues": ["The delivery line 'Delivery by 11:45 AM, Tomorrow · Updated 05 Nov, 04:59 AM' is cut off at 375px ('· Up…'), so retailers can't see the Updated time. Wrap it or put it on a second line."]},
+      {"screen": "Field Collect (app/field/collect.tsx)", "issues": ["Validation errors use the generic toast title 'Something went wrong'. Use a validation-style title."]},
+      {"screen": "Money → Field Collections → Day-wise statement (FieldCollectionsAdmin.tsx)", "issues": ["The per-row Rejected amount isn't shown. Row: Collected ₹52,844 / Handed over ₹27,680 / Pending ₹0 leaves ₹25,164 unexplained (it was rejected). 'difference' always equals pending by formula, so the 'Difference to reconcile' line adds nothing. Consider difference = collected − handed over, with the rejected amount shown.", "'Approve · Received' settles bills in one tap with no confirmation."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration17_distributor_ops.py", "/app/backend/tests/helper_iter17_edge.py", "/app/test_reports/pytest/pytest_iter17.xml"],
+  "action_items": [
+    "Set Parties modal: use the backend's per-customer in_area flag (area+address+city+pincode) for the visible count and ticks, not c.area only (team.tsx:44).",
+    "Field collections: subtract pending collections from the allowed amount; decide whether 'due' includes unbilled credit orders and make the Collect UI and backend use the same figure.",
+    "Enforce Set Parties on /field/customers/{id}/bills and POST /field/collections (staff_party_filter).",
+    "approve_collection: claim the record atomically before settling; tag collected_by only on the payments created in the loop; notify the salesperson on approve and reject.",
+    "GET /distributor/me/staff/{id}/parties: add a distributor_id filter.",
+    "Optional: require ops_roles 'field_sales' for owner on /field/* to match the UI toggle; remove dead api-keys fetch in app/d/more.tsx load(); avoid re-running match_parties on every GET."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 4,515 lines and should be split further.",
+    "app/d/more.tsx still calls GET /distributor/me/api-keys and keeps the keys state, even though the ERP section was removed (dead code plus an extra request).",
+    "DeliverySlotsCard: a manual time already in the past is saved but silently ignored by delivery_estimate. Warn the user when the chosen date/time has passed.",
+    "FieldCollectionsAdmin uses new Date('YYYY-MM-DD').toDateString(), which shows the previous day in timezones west of UTC. Fine for IST."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration17_distributor_ops.py (new)", "/app/backend/tests/helper_iter17_edge.py (new)"],
+  "success_rate": {"backend": "100% (22/22 pytest); 4 minor robustness/security gaps from edge probes", "frontend": "~95% (all requested flows work; 1 medium UI bug and minor design issues)"},
+  "seed_data_creation": "Test field collections were created for cust-2 (Wellness), with remarks TEST_collection, TEST_reject, TEST_race, TEST_over1, TEST_over2 and Ref TEST_UIUTR. Approved test collections settled ₹11+₹11+₹3+₹5 = ₹30 against INV-DEMO-212600. That is real demo-data mutation: the bill balance fell from ₹12,600 to ₹12,570 and cust-2 credit_used fell by ₹30. Rejected test collections remain in field_collections. A temporary TEST_ payment and its notification for demo@rxtech.com were inserted and then deleted, and demo credit_used was restored. The imported TEST party (code TESTP*) was deleted by code. Restored afterwards: ops_roles → [], fs-1 parties → their pre-test value ['Andheri','Bandra'] (set earlier by test_client_features, not by this run), Shree Ganesh link → unlinked, delivery-slots → original localities/slots with no manual time (updated_at changed). A temporary order reassignment to the owner was reverted directly in the DB.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Use test_iteration17_distributor_ops.py (needs EXPO_PUBLIC_BACKEND_URL exported from frontend/.env; reads MONGO_URL from backend/.env). Field-collection tests use cust-2 because cust-1 has no open bills (INV-DEMO-1* already settled); each run settles ₹11 more on INV-DEMO-212600. For a UI session, put the token in localStorage under 'rxtech_token' as a JSON string. fs-1 areas are currently ['Andheri','Bandra'] because test_client_features overwrote them; seed cust-1/2 addresses (Andheri West, Bandra East) still match. A 'TEST_PX Party' exception exists in dist_parties from an earlier run, not this one.",
+  "rca_of_issue": "Set Parties count mismatch: frontend inArea() (team.tsx:44) checks only c.area, which the backend fills as u.area || u.address, while backend _in_parties checks area+address+city+pincode. Fix: render the in_area flag that the backend already returns per customer."
+}

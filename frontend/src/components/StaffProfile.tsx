@@ -63,6 +63,12 @@ export function StaffProfile() {
           </TouchableOpacity>
         ) : null}
 
+        {me?.role === "owner" && (
+          <TouchableOpacity style={styles.row} onPress={() => router.replace("/d/home")} testID="back-to-owner">
+            <Ionicons name="swap-horizontal" size={20} color={colors.primary} />
+            <Text style={[styles.rowText, { color: colors.primary }]}>Back to Owner panel</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.row} onPress={logout} testID="logout-btn">
           <Ionicons name="log-out-outline" size={20} color={colors.danger} />
           <Text style={[styles.rowText, { color: colors.danger }]}>Log out</Text>

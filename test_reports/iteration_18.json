@@ -1,0 +1,37 @@
+{
+  "summary": "Retested the iteration_17 fixes, and every requested item passes. Backend: new test_iteration18_retest.py has 10 tests, all passing; the test_iteration17 regression suite (22 tests) also passes. Verified: (1) Set Parties: GET parties now returns 'hay', and the frontend inArea count (10) equals the backend visible_count and the parties sales@rxtech.com sees in /field/customers. (2) Collection cap = open bills minus pending collections; a second full-amount pending collection gets a 400 with 'open dues (₹X left after pending collections)'. (3) Out-of-party cust-3 returns 403 on both GET /field/customers/{id}/bills and POST /field/collections. (4) Approve is atomic: 4 concurrent approves gave [200,400,400,400] and a re-approve gives 400. Only the allocated bill's payments get field_collection_id and collected_by_name. Salesperson notifications 'Collection approved' (body includes the bill number) and 'Collection not received' (with reason) appear in GET /api/notifications. (5) Owner without ops_roles gets 403 on POST /field/collections and on GET bills; with field_sales the call succeeds; roles are reset to []. (6) owner2 (dist-3) gets 404 on GET and PATCH /distributor/me/staff/fs-1/parties. (7) Seed: fs-1 areas are Bhandup/Mulund/Thane, and each of cust-1..4 has its area inside its address. Frontend at 375px: Team → Set Parties for Amit Verma shows 'Retailers (10 visible)' with 10 'in area' rows, and the live count updates (8 for 'Bhandup'). Field Collect cards show 'Credit used ₹…' with no 'Due' label, cust-3 is hidden, and the over-cap submit shows the backend message in a toast. Owner Money → Field Collections → Day-wise statement shows 'Not received ₹…' on rejected rows. Pharmacy search card for dist-1 shows 'Delivery by 1:00 PM – 3:00 PM, Today · Updated 05 Nov, 05:07 AM' in full on 2 lines (scrollHeight equals clientHeight). No red screens. No deprecated expo packages.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/distributor/me/field-collections/{id}/approve", "issue": "If distributor_record_payment raises partway through the allocation loop (e.g. the bill was settled concurrently), the collection stays in status 'processing' forever, and some payments may already be recorded. It then disappears from Approvals and can't be approved or rejected again. Wrap the loop in try/except: on failure, set status back to pending_approval (or to 'failed'), or add a 'processing' recovery path. None are stuck today (0 'processing' docs)."},
+      {"endpoint": "POST /api/field/collections", "issue": "A retailer whose credit_used is only unbilled credit orders can't be collected from. Example: cust-1 shows 'Credit used ₹7,026' but has 0 open bills, so any amount returns 400 '₹0 left'. This is consistent with the bill-based cap, but the UI should say 'No open bills — nothing to collect yet' before the user types an amount."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Owner → Money → Field Collections → Day-wise statement", "issues": ["The KPI tile says 'REJECTED' while the row cells say 'Not received'. Use one label for both."]},
+      {"screen": "Field → Collect", "issues": ["Validation errors (over-cap amount) appear under the toast title 'Something went wrong'. Pass a title such as 'Check amount' to showError for 4xx validation messages."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration18_retest.py", "/app/backend/tests/test_iteration17_distributor_ops.py", "/app/test_reports/pytest/pytest_iter18.xml"],
+  "action_items": [
+    "Optional: in approve_collection, recover from errors in the allocation loop so a collection can't stay in 'processing'.",
+    "Optional: on Field Collect, when the retailer has 0 open bills, show 'Nothing to collect' and disable Submit.",
+    "Optional: align the 'REJECTED' KPI label with 'Not received' in the day-wise statement."
+  ],
+  "critical_code_review_comments": [
+    "The approve tagging is now scoped to the allocated bill codes with paid_at >= approval start, which is correct. A pharmacy payment on the same bill during the approval window could still be tagged, but the window is negligible.",
+    "_field_user lets the manager role record collections, and staff_party_filter returns None for managers, so managers see all parties. This seems intended; confirm.",
+    "Repeated test-suite runs (iter17 + iter18) approve small ₹1–11 field collections on cust-2, which slowly lowers demo dues. cust-1's bills are already fully settled by earlier runs (credit_used is now only ₹7,026 of unbilled orders), and TEST_Shop Bhandup duplicates from older runs clutter sales' party list."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration18_retest.py"],
+  "success_rate": {"backend": "100% (10/10 new + 22/22 iter17 regression)", "frontend": "100% (Set Parties count, Collect labels/403-hidden party/over-cap toast, Not received in statement, search Updated label not clipped)"},
+  "seed_data_creation": "Created TEST_iter18 field collections on cust-2 (all pending ones rejected during cleanup). Over 2 runs, 4 x ₹1 were approved and recorded as real payments on cust-2 bills (dues lowered by ₹4). Owner ops_roles was set to [] and fs-1 areas and party_ids are unchanged.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run with: export EXPO_PUBLIC_BACKEND_URL=$(grep EXPO_PUBLIC_BACKEND_URL /app/frontend/.env | cut -d= -f2); pytest /app/backend/tests/test_iteration18_retest.py. cust-1 has no open bills left, so use cust-2 for collection tests. In Playwright, the OTP boxes need page.locator('input:visible').first, because the hidden email input stays in the DOM.",
+  "rca_of_issue": "No new defects. Every iteration_17 issue in scope was verified as fixed."
+}

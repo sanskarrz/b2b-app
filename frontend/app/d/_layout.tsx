@@ -42,7 +42,7 @@ const NAV: NavSection[] = [
   },
   {
     title: "Account",
-    items: [{ label: "Settings & ERP", icon: "grid", route: "/d/more" }],
+    items: [{ label: "Settings", icon: "grid", route: "/d/more" }],
   },
 ];
 

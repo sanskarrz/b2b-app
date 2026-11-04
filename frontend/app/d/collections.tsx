@@ -3,7 +3,9 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput,
 import { useState, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { PaymentActivity } from "@/src/components/PaymentActivity";
+import { FieldCollectionsAdmin } from "@/src/components/FieldCollectionsAdmin";
 import { LinearGradient } from "expo-linear-gradient";
 import { api } from "@/src/api";
 import { showError, showSuccess } from "@/src/components/Toast";
@@ -17,7 +19,27 @@ const FILTERS = [
 ];
 const METHODS = ["cash", "upi", "cheque", "neft"];
 
-export default function DistributorCollections() {
+const TABS = [{ k: "receivables", l: "Receivables" }, { k: "payments", l: "Payments" }, { k: "field", l: "Field Collections" }];
+
+export default function CollectionsScreen() {
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const [tab, setTab] = useState(params.tab === "payments" || params.tab === "field" ? params.tab : "receivables");
+  return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <View style={{ flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border }}>
+        {TABS.map((t) => (
+          <TouchableOpacity key={t.k} onPress={() => setTab(t.k)} testID={`col-tab-${t.k}`}
+            style={{ flex: 1, alignItems: "center", paddingVertical: 12, borderBottomWidth: 3, borderBottomColor: tab === t.k ? colors.primary : "transparent" }}>
+            <Text style={{ fontWeight: "800", fontSize: 13, color: tab === t.k ? colors.text : colors.textSecondary }}>{t.l}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {tab === "receivables" ? <DistributorCollections /> : tab === "payments" ? <PaymentActivity /> : <FieldCollectionsAdmin />}
+    </SafeAreaView>
+  );
+}
+
+function DistributorCollections() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
@@ -73,7 +95,7 @@ export default function DistributorCollections() {
   const s = data?.summary;
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <View style={styles.container}>
       <LinearGradient colors={[colors.primarySoft, colors.primary]} style={styles.hero}>
         <Text style={styles.heroLabel}>TOTAL RECEIVABLE</Text>
         <Text style={styles.heroValue}>{formatINRFull(s?.total_outstanding || 0)}</Text>
@@ -176,7 +198,7 @@ export default function DistributorCollections() {
           </Pressable>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -29,13 +29,25 @@ export default function Team() {
   const [busy, setBusy] = useState(false);
   const [areaFor, setAreaFor] = useState<any | null>(null);
   const [areaText, setAreaText] = useState("");
+  const [partyData, setPartyData] = useState<any>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+
+  const openParties = async (s: any) => {
+    setAreaFor(s); setAreaText((s.areas || []).join(", ")); setPartyData(null);
+    try {
+      const r = await api(`/distributor/me/staff/${s.id}/parties`);
+      setPartyData(r); setPicked(r.party_ids || []);
+    } catch (e: any) { showError(e.message); }
+  };
+
+  const areaList = areaText.split(",").map((a) => a.trim()).filter(Boolean);
+  const inArea = (c: any) => areaList.some((a) => (c.hay || c.area || "").toLowerCase().includes(a.toLowerCase()));
 
   const saveAreas = async () => {
     if (!areaFor) return;
-    const areas = areaText.split(",").map((a) => a.trim()).filter(Boolean);
     try {
-      await api(`/distributor/me/staff/${areaFor.id}/areas`, { method: "PATCH", body: { areas } });
-      showSuccess("Areas updated");
+      await api(`/distributor/me/staff/${areaFor.id}/parties`, { method: "PATCH", body: { areas: areaList, party_ids: picked } });
+      showSuccess("Parties updated");
       setAreaFor(null); setAreaText("");
       await load();
     } catch (e: any) { showError(e?.message || "Failed"); }
@@ -108,10 +120,10 @@ export default function Team() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{s.name}</Text>
                   <Text style={styles.sub}>{m.l} · {s.email}</Text>
-                  {(s.role === "delivery" || s.role === "field_sales") && (
-                    <TouchableOpacity onPress={() => { setAreaFor(s); setAreaText((s.areas || []).join(", ")); }} testID={`areas-${s.id}`}>
+                  {(s.role === "delivery" || s.role === "field_sales" || (s.ops_roles || []).length > 0) && (
+                    <TouchableOpacity onPress={() => openParties(s)} testID={`areas-${s.id}`}>
                       <Text style={styles.areasLine}>
-                        <Ionicons name="map-outline" size={11} color={colors.primary} /> {(s.areas && s.areas.length) ? s.areas.join(", ") : "Set areas"}
+                        <Ionicons name="people-outline" size={11} color={colors.primary} /> {(s.areas?.length || s.party_ids?.length) ? `${(s.areas || []).join(", ")}${s.party_ids?.length ? ` + ${s.party_ids.length} parties` : ""}` : "Set Parties"}
                       </Text>
                     </TouchableOpacity>
                   )}
@@ -130,11 +142,25 @@ export default function Team() {
         <Pressable style={styles.modalBg} onPress={() => setAreaFor(null)}>
           <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
             <View style={styles.handle} />
-            <Text style={styles.modalTitle}>Coverage areas · {areaFor?.name}</Text>
-            <Text style={styles.fieldLabel}>Comma-separated areas / pincodes. Used for auto-assigning deliveries & leads.</Text>
-            <TextInput value={areaText} onChangeText={setAreaText} placeholder="e.g. Thane West, Mulund, 400601" placeholderTextColor={colors.textTertiary} style={styles.input} />
+            <Text style={styles.modalTitle}>Set Parties · {areaFor?.name}</Text>
+            <Text style={styles.fieldLabel}>Areas / pincodes (comma-separated) — every retailer in these areas is visible to them.</Text>
+            <TextInput value={areaText} onChangeText={setAreaText} placeholder="e.g. Thane West, Mulund, 400601" placeholderTextColor={colors.textTertiary} style={styles.input} testID="parties-areas" />
+            <Text style={styles.fieldLabel}>Retailers ({partyData ? partyData.customers.filter((c: any) => inArea(c) || picked.includes(c.id)).length : 0} visible) — tick extra parties outside their areas</Text>
+            <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled">
+              {(partyData?.customers || []).map((c: any) => {
+                const on = picked.includes(c.id) || inArea(c);
+                return (
+                  <TouchableOpacity key={c.id} disabled={inArea(c)} style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44 }}
+                    onPress={() => setPicked((p) => (p.includes(c.id) ? p.filter((x) => x !== c.id) : [...p, c.id]))} testID={`party-${c.id}`}>
+                    <Ionicons name={on ? "checkbox" : "square-outline"} size={20} color={on ? colors.primary : colors.textTertiary} />
+                    <Text style={{ flex: 1, color: colors.text, fontWeight: "600" }}>{c.name}</Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>{inArea(c) ? "in area" : c.area || ""}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
             <TouchableOpacity style={styles.saveBtn} onPress={saveAreas} testID="save-areas">
-              <Text style={styles.saveText}>Save areas</Text>
+              <Text style={styles.saveText}>Save parties</Text>
             </TouchableOpacity>
             <View style={{ height: 16 }} />
           </Pressable>

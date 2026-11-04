@@ -359,13 +359,12 @@ async def office_chat_send(req: OfficeChatReq, user: dict = Depends(get_current_
 async def field_customers(q: Optional[str] = None, user: dict = Depends(get_current_user)):
     require_role(user, {"field_sales", "manager", "owner"})
     d = await _dist_any(user)
-    agg = await db.orders.aggregate([
-        {"$match": {"distributor_id": d["id"]}},
-        {"$group": {"_id": "$user_id"}},
-    ]).to_list(1000)
-    uids = [r["_id"] for r in agg]
-    # also include converted leads' customers
-    users = await db.users.find({"id": {"$in": uids}}, {"_id": 0}).to_list(1000)
+    from distributor_ops import _dist_customer_ids, staff_party_filter  # noqa: E402
+    uids = await _dist_customer_ids(d["id"])  # mapped retailers + anyone who ordered
+    users = await db.users.find({"id": {"$in": uids}}, {"_id": 0}).to_list(5000)
+    pf = await staff_party_filter(user)  # "Set Parties": area retailers + assigned retailers
+    if pf:
+        users = [u for u in users if pf(u)]
     cc_map = {c["user_id"]: c for c in await db.customer_credit.find({"distributor_id": d["id"]}, {"_id": 0}).to_list(1000)}
     rows = []
     for u in users:

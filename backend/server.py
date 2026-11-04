@@ -101,6 +101,9 @@ def require_role(user: dict, allowed: set):
     """Raise 403 unless the user's role is in `allowed`."""
     role = user.get("role") or "pharmacist"
     if role not in allowed:
+        # Owner can also act as field sales / delivery when given that operational role
+        if role == "owner" and set(user.get("ops_roles") or []) & set(allowed):
+            return role
         raise HTTPException(status_code=403, detail="You don't have access to this action")
     return role
 
@@ -1143,10 +1146,18 @@ async def list_payments(status: Optional[str] = None, user: dict = Depends(get_c
 
 @api_router.post("/payments/{pid}/pay")
 async def pay_invoice(pid: str, user: dict = Depends(get_current_user)):
+    p = await db.payments.find_one({"id": pid, "user_id": user["id"]}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Invoice not found")
+    if p["status"] == "paid":
+        return {"success": True}
     await db.payments.update_one(
         {"id": pid, "user_id": user["id"]},
-        {"$set": {"status": "paid", "paid_at": iso(now_utc())}},
+        {"$set": {"status": "paid", "paid_at": iso(now_utc()), "pay_method": "online"}},
     )
+    await cc_inc(p["distributor_id"], user["id"], -p["amount"])
+    await notify("Payment received", f"{user.get('shop_name') or user.get('name') or 'A retailer'} paid ₹{p['amount']:,.0f} online for {p.get('invoice_code')}",
+                 distributor_id=p["distributor_id"], kind="payment", link="/d/collections?tab=payments")
     return {"success": True}
 
 
@@ -2255,6 +2266,11 @@ async def pay_lump_sum(req: PayLumpSumReq, user: dict = Depends(get_current_user
         if p.get("distributor_id"):
             await cc_inc(p["distributor_id"], user["id"], -p["amount"])
         total_paid += p["amount"]
+    if total_paid > 0:
+        dids = {x["distributor_id"] for x in await db.payments.find({"id": {"$in": req.payment_ids}}, {"_id": 0, "distributor_id": 1}).to_list(500)}
+        for did in dids:
+            await notify("Payment received", f"{user.get('shop_name') or user.get('name') or 'A retailer'} paid {len(req.payment_ids)} bill(s) online",
+                         distributor_id=did, kind="payment", link="/d/collections?tab=payments")
     return {"success": True, "count": len(req.payment_ids), "total_paid": round(total_paid, 2)}
 
 
@@ -2892,14 +2908,28 @@ def delivery_estimate(d: dict, user: Optional[dict]) -> dict:
         hay = " ".join(str(user.get(k) or "") for k in ("area", "address", "city", "pincode")).lower()
         if not any(l in hay for l in locs):
             return {"label": "Not in delivery area", "serviceable": False}
+    upd = cfg.get("updated_at")
+    upd_label = ("Updated " + datetime.fromisoformat(upd.replace("Z", "+00:00")).astimezone(IST).strftime("%d %b, %I:%M %p")) if upd else None
+    man = cfg.get("manual_at")
+    if man:
+        try:
+            m = datetime.fromisoformat(man).astimezone(IST)
+            now_d = datetime.now(IST)
+            if m > now_d:
+                day = "Today" if m.date() == now_d.date() else "Tomorrow" if m.date() == (now_d + timedelta(days=1)).date() else m.strftime("%d %b")
+                return {"label": f"Delivery by {m.strftime('%I:%M %p').lstrip('0')}, {day}", "serviceable": True,
+                        "cutoff": m.strftime("%H:%M") if day == "Today" else "99", "manual": True, "updated_label": upd_label,
+                        "note": cfg.get("manual_note")}
+        except ValueError:
+            pass
     if not slots:
-        return {"label": (d or {}).get("delivery_time") or "Delivery in 24 hrs", "serviceable": True}
+        return {"label": (d or {}).get("delivery_time") or "Delivery in 24 hrs", "serviceable": True, "updated_label": upd_label}
     now = datetime.now(IST).strftime("%H:%M")
     for s in slots:
         if now < s["cutoff"]:
-            return {"label": f"Delivery by {s.get('window') or s['cutoff']}, Today", "serviceable": True, "cutoff": s["cutoff"]}
+            return {"label": f"Delivery by {s.get('window') or s['cutoff']}, Today", "serviceable": True, "cutoff": s["cutoff"], "updated_label": upd_label}
     s = slots[0]
-    return {"label": f"Delivery by {s.get('window') or s['cutoff']}, Tomorrow", "serviceable": True, "cutoff": s["cutoff"]}
+    return {"label": f"Delivery by {s.get('window') or s['cutoff']}, Tomorrow", "serviceable": True, "cutoff": s["cutoff"], "updated_label": upd_label}
 
 
 
@@ -3808,7 +3838,7 @@ async def distributor_issue_debit_note(cust_id: str, req: DistNoteReq, user: dic
     return {"success": True, "item": dn}
 
 
-@api_router.get("/distributor/me/customers/{cust_id}/statement")
+@api_router.get("/distributor/me/customers/{cust_id}/statement-legacy")
 async def distributor_customer_statement(cust_id: str, user: dict = Depends(get_current_user)):
     """Full account statement data for a customer (used to render a shareable PDF)."""
     d = await get_owned_distributor(user)
@@ -4026,6 +4056,7 @@ def _staff_public(u: dict) -> dict:
     return {
         "id": u["id"], "name": u.get("name"), "email": u.get("email"), "phone": u.get("phone"),
         "role": u.get("role"), "active": u.get("active", True), "created_at": u.get("created_at"),
+        "ops_roles": u.get("ops_roles") or [], "areas": u.get("areas") or [], "party_ids": u.get("party_ids") or [],
     }
 
 
@@ -4036,6 +4067,9 @@ async def list_staff(role: Optional[str] = None, user: dict = Depends(get_curren
     if role:
         q["role"] = role
     rows = await db.users.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    owner = await db.users.find_one({"owned_distributor_id": d["id"], "role": "owner"}, {"_id": 0})
+    if owner and (not role or role in (owner.get("ops_roles") or [])):
+        rows.insert(0, owner)
     return [_staff_public(u) for u in rows]
 
 
@@ -4118,7 +4152,8 @@ async def assign_delivery(order_id: str, req: AssignReq, user: dict = Depends(ge
     o = await db.orders.find_one({"id": order_id, "distributor_id": d["id"]}, {"_id": 0})
     if not o:
         raise HTTPException(404, "Order not found")
-    rider = await db.users.find_one({"id": req.delivery_user_id, "distributor_id": d["id"], "role": "delivery"}, {"_id": 0})
+    rider = await db.users.find_one({"id": req.delivery_user_id, "distributor_id": d["id"], "$or": [
+        {"role": "delivery"}, {"role": "owner", "ops_roles": "delivery"}]}, {"_id": 0})
     if not rider:
         raise HTTPException(404, "Delivery person not found")
     await db.orders.update_one({"id": order_id}, {"$set": {
@@ -4436,6 +4471,8 @@ from client_features import feature_router  # noqa: E402
 app.include_router(feature_router)
 from retail_features import retail_router  # noqa: E402
 app.include_router(retail_router)
+from distributor_ops import ops_router  # noqa: E402
+app.include_router(ops_router)
 
 # ERP data-sync (import/export) endpoints
 from sync_engine import sync_router, auto_sync_loop, ensure_sync_indexes  # noqa: E402
@@ -4457,6 +4494,8 @@ async def startup():
     await seed_team_demo()
     from retail_features import migrate_retail  # noqa: E402
     await migrate_retail()
+    from distributor_ops import seed_demo_logins  # noqa: E402
+    await seed_demo_logins()
     import asyncio
 
     async def _bg_init():

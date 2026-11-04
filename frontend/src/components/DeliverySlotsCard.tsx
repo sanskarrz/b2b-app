@@ -15,16 +15,30 @@ export function DeliverySlotsCard() {
   const [geo, setGeo] = useState<any>({});
   const [busy, setBusy] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const [mDate, setMDate] = useState("");
+  const [mTime, setMTime] = useState("");
+  const [mNote, setMNote] = useState("");
 
   useFocusEffect(useCallback(() => {
-    api("/distributor/me/delivery-slots").then((r) => { setLocs(r.localities); setSlots(r.slots); setGeo(r); }).catch(() => {});
+    api("/distributor/me/delivery-slots").then((r) => {
+      setLocs(r.localities); setSlots(r.slots); setGeo(r); setMNote(r.manual_note || "");
+      if (r.manual_at) { setMDate(r.manual_at.slice(0, 10)); setMTime(r.manual_at.slice(11, 16)); }
+    }).catch(() => {});
   }, []));
+
+  const dayStr = (add: number) => {
+    const d = new Date(Date.now() + add * 86400000 + 330 * 60000);
+    return d.toISOString().slice(0, 10);
+  };
 
   const save = async () => {
     setBusy(true);
     try {
-      const r = await api("/distributor/me/delivery-slots", { method: "PUT", body: { localities: locs, slots: slots.filter((s) => s.cutoff || s.window) } });
-      setLocs(r.localities); setSlots(r.slots);
+      const r = await api("/distributor/me/delivery-slots", { method: "PUT", body: {
+        localities: locs, slots: slots.filter((s) => s.cutoff || s.window),
+        manual_date: mDate && mTime ? mDate : null, manual_time: mDate && mTime ? mTime : null, manual_note: mNote,
+      } });
+      setLocs(r.localities); setSlots(r.slots); setGeo((g: any) => ({ ...g, updated_at: r.updated_at }));
       showSuccess("Delivery areas & slots saved");
     } catch (e: any) { showError(e.message); } finally { setBusy(false); }
   };
@@ -83,6 +97,19 @@ export function DeliverySlotsCard() {
       <TouchableOpacity onPress={() => setSlots([...slots, { cutoff: "", window: "" }])} style={{ minHeight: 36, justifyContent: "center" }} testID="slot-add">
         <Text style={styles.ghostText}>+ Add slot (cut-off HH:MM, 24h)</Text>
       </TouchableOpacity>
+
+      <Text style={[styles.title, { marginTop: 16 }]}>Next delivery time (manual)</Text>
+      <Text style={styles.sub}>Shown to retailers in search & compare instead of slots until it passes. {geo.updated_at ? `Last updated ${new Date(geo.updated_at).toLocaleString("en-IN")}` : ""}</Text>
+      <View style={styles.row}>
+        {[{ l: "Today", d: dayStr(0) }, { l: "Tomorrow", d: dayStr(1) }].map((x) => (
+          <TouchableOpacity key={x.l} style={[styles.chip, mDate === x.d && { backgroundColor: colors.primary, borderColor: colors.primary }]} onPress={() => setMDate(x.d)} testID={`manual-${x.l}`}>
+            <Text style={[styles.chipText, mDate === x.d && { color: "#FFF" }]}>{x.l}</Text>
+          </TouchableOpacity>
+        ))}
+        <TextInput style={[styles.in, { width: 80 }]} value={mTime} onChangeText={setMTime} placeholder="16:30" placeholderTextColor={colors.textTertiary} testID="manual-time" />
+        {!!(mDate || mTime) && <TouchableOpacity onPress={() => { setMDate(""); setMTime(""); }} hitSlop={8}><Ionicons name="close-circle" size={20} color={colors.danger} /></TouchableOpacity>}
+      </View>
+      <TextInput style={styles.in} value={mNote} onChangeText={setMNote} placeholder="Note (optional) e.g. Van leaves at 4 PM" placeholderTextColor={colors.textTertiary} />
       <TouchableOpacity style={styles.save} onPress={save} disabled={busy} testID="slots-save">
         {busy ? <ActivityIndicator color="#FFF" /> : <Text style={styles.addText}>Save delivery settings</Text>}
       </TouchableOpacity>
