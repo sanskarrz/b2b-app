@@ -1,0 +1,25 @@
+{
+  "summary": "Android build-config fix verified, plus a frontend regression smoke test. splash-icon.png is present (1024x1024). app.json uses #000000 everywhere. icon.png and adaptive-icon.png are both 512x512. expo-doctor passed 18/18. 'expo install --check' says dependencies are up to date. There is no nested @react-navigation under expo-router; expo-linking/node_modules holds only an empty .bin, so there is no nested expo-constants. yarn.lock is the only lockfile (no package-lock.json). No android/ios folders exist in /app/frontend. Installed versions: expo 54.0.38, @react-navigation native 7.2.4, bottom-tabs 7.16.0, native-stack 7.15.0, elements 2.9.17. 'npx expo prebuild --platform android --no-install' succeeded in a temp copy (/tmp/t1pb). UI smoke at 390x844 passed with no page errors: pharmacy OTP login, all 5 tabs, /search, /compare and back navigation; owner OTP login to /d/home, the Money tab with Receivables/Payments/Field Collections, and all distributor tabs; field sales password login to /field/home and the Pipeline/Collect/Chat/Profile tabs.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [{"screen": "field/collect, d/collections", "issues": ["Records left over from earlier test runs show up in the demo data: 6x 'TEST_Shop Bhandup' parties and several TEST_ collections. Cosmetic only, not caused by this change."]}],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional: add .metro-cache/ to /app/frontend/.gitignore. Git shows many untracked .metro-cache files.",
+    "Optional: package.json still declares older caret ranges (bottom-tabs ^7.4.0, native ^7.1.8, native-stack ^7.3.16), while 7.16/7.2.4/7.15 are installed. This is fine because yarn.lock pins the versions, but you could raise the ranges to match."
+  ],
+  "critical_code_review_comments": [
+    "favicon.png is 512x513. This doesn't block the build because it's only used on web, but you could make it square."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not requested)", "frontend": "100%"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Build config is verified. Test prebuild only in a temp copy (tar the project without node_modules, then symlink node_modules); never run it in /app/frontend. Dev OTP shows on the OTP screen as 'Dev mode • OTP: ######'. otp-input-0..5 testIDs, password-input, staff-login-btn, portal-pharmacy/portal-distributor, col-tab-{receivables,payments,field}.",
+  "rca_of_issue": "The original EAS failure happened because app.json's expo-splash-screen plugin referenced ./assets/images/splash-icon.png, which didn't exist. The file now exists and prebuild completes."
+}

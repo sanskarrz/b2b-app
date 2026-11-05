@@ -275,12 +275,14 @@ class TestQueries:
         assert all(x["id"] != n["id"] for x in requests.get(f"{API}/shortbook/notes", headers=t).json())
 
     def test_bills_and_returns_flag(self, demo):
-        bills = requests.get(f"{API}/retail/bills", headers=H(demo)).json()
-        assert bills and all(b["suggested_mode"] == ("sellable" if b["payment_state"] == "paid" else "issue") for b in bills)
-        assert requests.post(f"{API}/retail/returns/flag", headers=H(demo), json={"bill_ids": [], "category": "damaged_goods", "mode": "issue", "title": "x"}).status_code == 400
-        assert requests.post(f"{API}/retail/returns/flag", headers=H(demo), json={"bill_ids": [bills[0]["bill_id"]], "category": "bad", "mode": "issue", "title": "x"}).status_code == 400
-        f = requests.get(f"{API}/retail/bills", headers=H(demo), params={"bill": bills[0]["bill_number"]}).json()
-        assert f and f[0]["bill_number"] == bills[0]["bill_number"]
+        orders = requests.get(f"{API}/retail/returnable-orders", headers=H(demo)).json()
+        assert orders and all(o["suggested_mode"] == ("sellable" if o["payment_state"] == "paid" else "issue") for o in orders)
+        oid = orders[0]["order_id"]
+        assert requests.post(f"{API}/retail/returns/flag", headers=H(demo), json={"order_id": oid, "items": [], "category": "damaged_goods", "mode": "issue"}).status_code == 400
+        assert requests.post(f"{API}/retail/returns/flag", headers=H(demo), json={"order_id": oid, "items": [{"line": 0, "qty": 1}], "category": "bad", "mode": "issue"}).status_code == 400
+        assert requests.post(f"{API}/retail/returns/flag", headers=H(demo), json={"order_id": oid, "items": [{"line": 0, "qty": 99999}], "category": "damaged_goods", "mode": "issue"}).status_code == 400
+        f = requests.get(f"{API}/retail/returnable-orders", headers=H(demo), params={"bill": orders[0]["bill_number"]}).json()
+        assert f and f[0]["bill_number"] == orders[0]["bill_number"]
 
 
 # ---------- Slots / Uploads ----------

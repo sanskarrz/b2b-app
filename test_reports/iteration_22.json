@@ -1,0 +1,48 @@
+{
+  "summary": "Tested the order-detail viewer fix, product-wise returns from delivered orders, query threads with replies and photos, and the distributor tab bar. Backend: 15 of 16 tests pass in the new file tests/test_iteration22_returns_queries.py. The one failure is real: POST /retail/returns/flag accepts the same product line twice and lets the pharmacy return more than it received. Frontend at 390x844: distributor Orders -> open icon -> /order/[id] loads with the customer card and no Confirm Delivery button, so the infinite loader is fixed. Query Management thread, Open order link, Send reply (modal stays open), In progress and Resolve all work. Photo attach works for pharmacy and distributor, and the photos load for the other side. Pharmacy reply, Confirm & Unflag, the /returns flow (pre-opened from order detail, steppers, mode preselected, no title field, submit, shows in My Returns) and On Hold -> /disputes all work. The 6-tab bar is even at 390 and 768 and is hidden on /d/queries, /d/team, /d/settings and /d/messages. CRITICAL: the query modal in /d/queries and /disputes does not scroll on web. Once a thread has 3 or more messages, the Resolve, Reject, Send and Confirm & Unflag buttons are pushed below the screen and users cannot reach them. No deprecated Expo packages found.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/retail/returns/flag", "issue": "The same line can appear twice in items, e.g. [{line:0,qty:N},{line:0,qty:N}]. Each entry is checked against the remaining qty on its own, so the request is accepted and the pharmacy returns 2x what it received. Reproduced 3 times (created 'Azee 500 x 6, Azee 500 x 6' returns). Fix: merge qty per line, or keep a running total in the loop, before the `x.qty > left` check (retail_features.py ~706-712).", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "GET /api/orders/{id}", "issue": "field_sales and delivery staff can open ANY order of their distributor, with customer name and phone. Verified: delivery@rxtech.com (dl-1) got 200 on order c03265d5... which has assigned_to=None. The documented permissions say delivery sees only its assigned orders. Limit to owner/manager, plus delivery where assigned_to == user.id (server.py ~1131)."},
+      {"endpoint": "PATCH /api/distributor/me/disputes/{id} + POST /api/disputes/{id}/reply", "issue": "A pharmacy reply reopens a rejected returns-dispute, but the linked return stays 'rejected' and its qty is already returnable again. If the distributor later resolves it, the return flips to 'approved' while that qty may already have been claimed by a new return. Consider setting the return back to 'requested' on reopen and re-checking qty."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Query modal (d/queries.tsx:118-153, disputes.tsx:89-115)", "issue": "Modal content does not scroll on web. modalCard has maxHeight 85%/88%, but the KeyboardAvoidingView wrapper lets the ScrollView grow to full content height (scrollHeight 952 vs clientHeight 717, overflow visible). Mouse wheel does nothing. With a few messages, resolve-query sits at y=970 and unflag-{id} at y=1140 on an 844px screen, so users cannot reach them. Fix: give the KeyboardAvoidingView style={{flexShrink:1}} (or flex:1 with a fixed modal height) and the ScrollView style={{flexGrow:0}}, or replace both with one bounded ScrollView.", "testID": "resolve-query, reject-query, query-send-reply, my-query-send, unflag-{id}", "priority": "CRITICAL"},
+      {"component": "Distributor Orders list (d/orders.tsx:90-118)", "issue": "The open/view icon only renders inside the actions block for placed, accepted or dispatched orders, and the card itself is not tappable. Delivered and cancelled orders cannot be opened from the Orders tab: 0 view buttons on the Delivered filter with 12 orders.", "testID": "d-order-view-{id}", "priority": "HIGH"},
+      {"component": "Distributor Orders filter chips (d/orders.tsx:142, styles.tabsScroll)", "issue": "When the list has items, the horizontal chip ScrollView shrinks to 4-16px tall and the All/New/Accepted/Dispatched/Delivered chips are cut off. It has flexGrow:0 but the default flexShrink:1. Add flexShrink:0 (or a fixed height of about 44).", "testID": "", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/d/orders, /d/queries", "issues": ["viewBtn and the queries back button are 36x36, below the 44pt touch target", "Query filter chips are 32px tall"]},
+      {"screen": "QueryThread", "issues": ["The 'Products to return' box has extra top gap: section marginTop 14 inside a padded box"]},
+      {"screen": "Distributor tab bar at 320px width", "issues": ["The 'Customers' label slightly overflows its 53px tab (scrollWidth > clientWidth). Fine at 390 and 768."]},
+      {"screen": "/returns My Returns", "issues": ["REQUESTED, APPROVED and REJECTED pills all use the same orange colour. Use distinct success/danger colours."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration22_returns_queries.py", "/app/test_reports/pytest/iteration22.xml"],
+  "action_items": [
+    "CRITICAL: Make the query modal scroll in d/queries.tsx and disputes.tsx. The KeyboardAvoidingView needs flexShrink:1 and the ScrollView needs a bounded height. Otherwise Resolve/Reject/Send/Confirm & Unflag are unreachable on long threads.",
+    "HIGH: In /retail/returns/flag, add up duplicate lines before checking the returnable qty, and return 400 when the total exceeds it.",
+    "HIGH: Distributor Orders: make the whole card tappable, or always render the view icon, including for delivered and cancelled orders.",
+    "MEDIUM: d/orders.tsx tabsScroll: add flexShrink:0 so the filter chips stop collapsing.",
+    "MEDIUM: GET /orders/{id}: restrict delivery and field_sales staff (delivery only for assigned orders).",
+    "LOW: Keep the return status in sync when a rejected or resolved returns-dispute is reopened by a pharmacy reply."
+  ],
+  "critical_code_review_comments": [
+    "server.py (4524 lines), client_features.py (863) and retail_features.py (893) are all over 700 lines and should be split.",
+    "The order/[id] loader fix is correct: there is now an error state with retry, and the backend returns viewer='distributor'.",
+    "Demo data: every delivered order for demo@rxtech.com currently resolves to payment_state 'paid', so the 'issue' suggested mode could not be checked in the UI (backend accepts mode=issue)."
+  ],
+  "updated_files": ["/app/frontend/app/d/orders.tsx (added testID d-order-view-{id} to the view button)", "/app/backend/tests/test_iteration22_returns_queries.py (new)"],
+  "success_rate": {"backend": "94% (15/16)", "frontend": "80% (core flows work; modal scroll, delivered-order view and chip collapse fail)"},
+  "seed_data_creation": "Test data was created on demo@rxtech.com's delivered dist-1 order F00526-A4120185 (Azee 500): returns/disputes with TEST_ descriptions, including DSP-12806 and DSP-74376 plus 3 duplicate-line returns from the bug repro. All were rejected or resolved and then unflagged (closed). Rejected returns no longer count against returnable qty. A few TEST_ PNG uploads were also stored. DEFECT TO NOTE: my cleanup script also rejected and closed DSP-74738 ('TEST_Dolo 650', shortbook, created 2026-11-04 22:44 by an earlier test run). I did not create it.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: cd /app/backend && EXPO_PUBLIC_BACKEND_URL=... pytest tests/test_iteration22_returns_queries.py. test_duplicate_line_exceeds fails until the backend fix; it rejects and unflags whatever it creates. Logins: demo (pharmacy OTP), owner (OTP), manager/delivery (Pass@123, portal=distributor). Dev OTP appears on the OTP screen as 'OTP: ######'. Web photo attach: expect_file_chooser on [data-testid=<prefix>-gallery] (query-reply-photo-gallery, my-query-photo-gallery). Use a DOM element.click() to reach modal buttons below the screen until the scroll fix lands.",
+  "rca_of_issue": "Modal scroll: on react-native-web, a ScrollView inside an unconstrained KeyboardAvoidingView (a View with no flex or height) gets its content height, so the parent's maxHeight clips nothing (overflow visible) and the ScrollView never scrolls. Duplicate-line return: flag_returns computes `left` from DB returns only and never adds up the earlier entries in the same request."
+}

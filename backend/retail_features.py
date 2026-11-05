@@ -615,24 +615,71 @@ def _bill_rows(pays: List[dict]) -> List[dict]:
     return out
 
 
-@retail_router.get("/retail/bills")
-async def search_bills(distributor: Optional[str] = None, bill: Optional[str] = None, user: dict = Depends(get_current_user)):
-    pays = await db.payments.find({"user_id": user["id"]}, {"_id": 0}).to_list(2000)
-    rows = _bill_rows(pays)
+# ============================================================
+# Returns — only from orders the pharmacy has RECEIVED (delivered), product-wise
+# ============================================================
+def _order_bill_no(o: dict) -> str:
+    return o.get("invoice_number") or o.get("code") or ""
+
+
+async def _returned_qty(user_id: str, order_id: str) -> dict:
+    """Qty already returned per order line (open / approved returns, not rejected)."""
+    out: dict = {}
+    async for r in db.returns.find({"user_id": user_id, "order_id": order_id, "status": {"$ne": "rejected"}}, {"_id": 0, "items": 1}):
+        for it in r.get("items") or []:
+            out[it["line"]] = out.get(it["line"], 0) + it["qty"]
+    return out
+
+
+def _payment_state(o: dict, pays: List[dict]) -> str:
+    bill = _order_bill_no(o)
+    rows = [b for b in _bill_rows([p for p in pays if p["distributor_id"] == o["distributor_id"]]) if b["bill_number"] == bill]
+    if rows:
+        return rows[0]["payment_state"]
+    if o.get("payment_method") == "credit" and not o.get("delivery_confirmed"):
+        return "unpaid"
+    return "paid" if (o.get("amount_on_credit") or 0) <= 0 else "partial"
+
+
+@retail_router.get("/retail/returnable-orders")
+async def returnable_orders(distributor: Optional[str] = None, bill: Optional[str] = None, user: dict = Depends(get_current_user)):
+    orders = await db.orders.find({"user_id": user["id"], "$or": [{"status": "delivered"}, {"delivery_confirmed": True}]},
+                                  {"_id": 0}).sort("created_at", -1).to_list(300)
     if distributor:
         dl = distributor.lower()
-        rows = [r for r in rows if dl in (r["distributor_name"] or "").lower()]
+        orders = [o for o in orders if dl in (o.get("distributor_name") or "").lower()]
     if bill:
         bl = bill.lower()
-        rows = [r for r in rows if bl in (r["bill_number"] or "").lower()]
-    return rows
+        orders = [o for o in orders if bl in _order_bill_no(o).lower() or bl in (o.get("code") or "").lower()]
+    pays = await db.payments.find({"user_id": user["id"]}, {"_id": 0}).to_list(2000)
+    out = []
+    for o in orders:
+        done = await _returned_qty(user["id"], o["id"])
+        lines = []
+        for i, it in enumerate(o.get("items") or []):
+            got = int(it.get("qty") or 0) + int(it.get("free_qty") or 0)
+            lines.append({"line": i, "product_id": it.get("product_id"), "name": it.get("name"), "price": it.get("price", 0),
+                          "batch": it.get("batch"), "expiry": it.get("expiry"), "received_qty": got,
+                          "returned_qty": done.get(i, 0), "returnable_qty": max(got - done.get(i, 0), 0)})
+        state = _payment_state(o, pays)
+        out.append({"order_id": o["id"], "code": o.get("code"), "bill_number": _order_bill_no(o),
+                    "distributor_id": o["distributor_id"], "distributor_name": o.get("distributor_name"),
+                    "delivered_at": o.get("delivery_confirmed_at") or o.get("delivered_at") or o.get("created_at"),
+                    "total": o.get("total", 0), "payment_state": state,
+                    "suggested_mode": "sellable" if state == "paid" else "issue", "items": lines})
+    return out
+
+
+class ReturnLine(BaseModel):
+    line: int
+    qty: int
 
 
 class ReturnFlagReq(BaseModel):
-    bill_ids: List[str]
+    order_id: str
+    items: List[ReturnLine]
     category: str
     mode: str  # sellable | issue (pre-picked from payment state, confirmed by pharmacy)
-    title: str
     description: Optional[str] = None
     photo_file_ids: Optional[List[str]] = None
     audio_file_id: Optional[str] = None
@@ -645,31 +692,47 @@ async def flag_returns(req: ReturnFlagReq, user: dict = Depends(get_current_user
         raise HTTPException(400, "Pick a valid issue category")
     if req.mode not in ("sellable", "issue"):
         raise HTTPException(400, "Pick Sellable or Issue")
-    if not req.bill_ids:
-        raise HTTPException(400, "Select at least one bill")
-    rows = [b for b in _bill_rows(await db.payments.find({"user_id": user["id"]}, {"_id": 0}).to_list(2000)) if b["bill_id"] in req.bill_ids]
-    if not rows:
-        raise HTTPException(404, "Bills not found")
-    by_d: dict = {}
-    for b in rows:
-        by_d.setdefault(b["distributor_id"], []).append(b)
-    created = []
-    for did, bills in by_d.items():
-        doc = await create_dispute_doc(DisputeReq(
-            distributor_id=did, type=req.category, title=req.title, description=req.description,
-            photo_file_ids=req.photo_file_ids, audio_file_id=req.audio_file_id, transcript=req.transcript,
-            bill_ids=[b["bill_id"] for b in bills], bill_numbers=[b["bill_number"] for b in bills],
-            mode=req.mode, source="returns"), user)
-        await db.returns.insert_one({
-            "id": str(uuid.uuid4()), "user_id": user["id"], "distributor_id": did,
-            "distributor_name": bills[0]["distributor_name"], "product_name": req.title.strip(),
-            "reason": CATEGORY_LABELS.get(req.category), "category": req.category, "mode": req.mode,
-            "bill_numbers": [b["bill_number"] for b in bills], "dispute_id": doc["id"],
-            "qty": 0, "amount": round(sum(b["amount_total"] for b in bills), 2),
-            "status": "requested", "created_at": iso(now_utc()),
-        })
-        created.append(doc)
-    return {"success": True, "disputes": created}
+    merged: dict = {}
+    for x in req.items:  # same product line sent twice counts once (summed)
+        if x.qty > 0:
+            merged[x.line] = merged.get(x.line, 0) + x.qty
+    picked = [ReturnLine(line=k, qty=v) for k, v in merged.items()]
+    if not picked:
+        raise HTTPException(400, "Select at least one product and quantity")
+    o = await db.orders.find_one({"id": req.order_id, "user_id": user["id"]}, {"_id": 0})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if not (o.get("status") == "delivered" or o.get("delivery_confirmed")):
+        raise HTTPException(400, "You can return only orders you have received")
+    lines = o.get("items") or []
+    done = await _returned_qty(user["id"], o["id"])
+    items = []
+    for x in picked:
+        if x.line < 0 or x.line >= len(lines):
+            raise HTTPException(400, "Invalid product line")
+        it = lines[x.line]
+        left = int(it.get("qty") or 0) + int(it.get("free_qty") or 0) - done.get(x.line, 0)
+        if x.qty > left:
+            raise HTTPException(400, f"{it.get('name')}: only {max(left, 0)} left to return")
+        items.append({"line": x.line, "product_id": it.get("product_id"), "name": it.get("name"), "qty": x.qty,
+                      "price": it.get("price", 0), "batch": it.get("batch"), "amount": round(x.qty * (it.get("price") or 0), 2)})
+    bill = _order_bill_no(o)
+    title = ", ".join(f"{i['name']} × {i['qty']}" for i in items)
+    doc = await create_dispute_doc(DisputeReq(
+        distributor_id=o["distributor_id"], type=req.category, title=title[:200], description=req.description,
+        photo_file_ids=req.photo_file_ids, audio_file_id=req.audio_file_id, transcript=req.transcript,
+        order_id=o["id"], bill_numbers=[bill] if bill else [], mode=req.mode, source="returns", items=items), user)
+    ret = {
+        "id": str(uuid.uuid4()), "user_id": user["id"], "distributor_id": o["distributor_id"],
+        "distributor_name": o.get("distributor_name"), "product_name": title[:200], "order_id": o["id"],
+        "reason": CATEGORY_LABELS.get(req.category), "category": req.category, "mode": req.mode,
+        "bill_numbers": [bill] if bill else [], "dispute_id": doc["id"], "items": items,
+        "qty": sum(i["qty"] for i in items), "amount": round(sum(i["amount"] for i in items), 2),
+        "status": "requested", "created_at": iso(now_utc()),
+    }
+    await db.returns.insert_one({**ret})
+    ret.pop("_id", None)
+    return {"success": True, "dispute": doc, "return": ret}
 
 
 # ============================================================
@@ -826,7 +889,8 @@ async def get_file(fid: str, token: Optional[str] = Query(None),
     if not user or not f:
         raise HTTPException(404, "File not found")
     did = user.get("owned_distributor_id") or user.get("distributor_id")
-    if f["owner_id"] != uid and not (did and did in (f.get("shared_with") or [])):
+    shared = f.get("shared_with") or []
+    if f["owner_id"] != uid and uid not in shared and not (did and did in shared):
         raise HTTPException(404, "File not found")
     data, ctype = await run_in_threadpool(_get, f["path"])
     return Response(content=data, media_type=f.get("content_type") or ctype,

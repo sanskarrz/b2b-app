@@ -1,5 +1,5 @@
 // Distributor Query Management — disputes (wrong supply / returns / credit / other)
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList, Modal, Pressable, TextInput, ScrollView } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList, Modal, Pressable, TextInput, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
 import { useState, useCallback } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,7 +8,8 @@ import { api } from "@/src/api";
 import { showError, showSuccess } from "@/src/components/Toast";
 import { colors, radius } from "@/src/theme";
 import { TYPE_LABEL, STATUS_COLOR, STATUS_LABEL } from "@/src/utils/queryLabels";
-import { FileImage, VoicePlayer } from "@/src/components/FileMedia";
+import { QueryThread } from "@/src/components/QueryThread";
+import { PhotoAttach, Photo } from "@/src/components/PhotoAttach";
 
 const TYPES = [
   { k: "", l: "All" },
@@ -26,27 +27,41 @@ export default function Queries() {
   const [loading, setLoading] = useState(true);
   const [type, setType] = useState("");
   const [sel, setSel] = useState<any | null>(null);
-  const [resolution, setResolution] = useState("");
+  const [reply, setReply] = useState("");
+  const [photos, setPhotos] = useState<Photo[]>([]);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const qs = new URLSearchParams();
       if (type) qs.set("type", type);
-      setData(await api(`/distributor/me/disputes?${qs.toString()}`));
+      const r = await api(`/distributor/me/disputes?${qs.toString()}`);
+      setData(r);
+      return r;
     } catch (e: any) { showError(e?.message || "Could not load queries", "Load failed"); }
     finally { setLoading(false); }
   }, [type]);
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
-  const act = async (status: string) => {
+  const openQuery = (d: any) => { setSel(d); setReply(""); setPhotos([]); };
+
+  // status === null → just send the reply (message + photos) and keep the ticket open on screen
+  const act = async (status: string | null) => {
     if (!sel) return;
+    const note = reply.trim();
+    if (!status && !note && !photos.length) return showError("Write a reply or attach a photo");
     setBusy(true);
     try {
-      await api(`/distributor/me/disputes/${sel.id}`, { method: "PATCH", body: { status, resolution: resolution.trim() || null } });
-      showSuccess(`Marked ${status.replace("_", " ")}`);
-      setSel(null); setResolution("");
-      await load();
+      const body: any = { note: note || null, photo_file_ids: photos.map((p) => p.id) };
+      if (status) body.status = status;
+      if (status === "resolved" || status === "rejected") body.resolution = note || sel.resolution || null;
+      await api(`/distributor/me/disputes/${sel.id}`, { method: "PATCH", body });
+      showSuccess(status ? `Marked ${status.replace("_", " ")}` : "Reply sent — retailer notified");
+      setReply(""); setPhotos([]);
+      const r = await load();
+      const fresh = r?.items?.find((x: any) => x.id === sel.id);
+      if (status === "resolved" || status === "rejected" || !fresh) setSel(null);
+      else setSel(fresh);
     } catch (e: any) { showError(e?.message || "Failed"); }
     finally { setBusy(false); }
   };
@@ -86,7 +101,7 @@ export default function Queries() {
           contentContainerStyle={{ padding: 12, paddingBottom: 30 }}
           ListEmptyComponent={<View style={styles.empty}><Ionicons name="checkmark-done-circle-outline" size={42} color={colors.textTertiary} /><Text style={styles.emptyText}>No queries here</Text></View>}
           renderItem={({ item: d }) => (
-            <TouchableOpacity style={styles.card} onPress={() => { setSel(d); setResolution(d.resolution || ""); }} testID={`query-${d.id}`}>
+            <TouchableOpacity style={styles.card} onPress={() => openQuery(d)} testID={`query-${d.id}`}>
               <View style={styles.cardTop}>
                 <Text style={styles.code}>{d.code} · {TYPE_LABEL[d.type] || d.type}{d.mode ? ` · ${d.mode === "sellable" ? "Sellable" : "Issue"}` : ""}</Text>
                 <View style={[styles.statusPill, { backgroundColor: (STATUS_COLOR[d.status] || colors.textSecondary) + "22" }]}>
@@ -104,36 +119,35 @@ export default function Queries() {
         <Pressable style={styles.modalBg} onPress={() => setSel(null)}>
           <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
             <View style={styles.handle} />
-            <ScrollView keyboardShouldPersistTaps="handled">
-              <Text style={styles.modalTitle}>{sel?.title}</Text>
-              <Text style={styles.modalMeta}>{sel?.code} · {TYPE_LABEL[sel?.type] || sel?.type} · {sel?.customer_name}</Text>
-              {!!sel?.bill_numbers?.length && <Text style={styles.modalMeta}>Bills: {sel.bill_numbers.join(", ")}{sel.mode ? ` · ${sel.mode === "sellable" ? "Sellable (fully paid)" : "Issue (part / unpaid)"}` : ""}</Text>}
-              {!!sel?.description && <Text style={styles.desc}>{sel.description}</Text>}
-              {(sel?.photo_file_ids?.length > 0 || sel?.audio_file_id) && (
-                <View style={{ flexDirection: "row", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-                  {(sel.photo_file_ids || []).map((id: string) => <FileImage key={id} id={id} size={72} />)}
-                  {!!sel.audio_file_id && <VoicePlayer id={sel.audio_file_id} />}
-                </View>
-              )}
+            <KeyboardAvoidingView style={{ flexShrink: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+            <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled">
+              {!!sel && <QueryThread q={sel} side="distributor" onOpenOrder={(oid) => { setSel(null); router.push(`/order/${oid}`); }} />}
               {sel?.status === "closed" ? (
                 <Text style={[styles.desc, { color: colors.success, fontWeight: "700" }]}>Closed — the retailer confirmed and unflagged this ticket.</Text>
               ) : (<>
-              <Text style={styles.fieldLabel}>Resolution note</Text>
-              <TextInput value={resolution} onChangeText={setResolution} placeholder="How was it resolved?" placeholderTextColor={colors.textTertiary} style={styles.input} multiline />
+              <Text style={styles.fieldLabel}>Reply / resolution note</Text>
+              <TextInput value={reply} onChangeText={setReply} placeholder="Write to the retailer…" placeholderTextColor={colors.textTertiary} style={styles.input} multiline testID="query-reply-input" />
+              <View style={{ marginTop: 10 }}>
+                <PhotoAttach photos={photos} onChange={setPhotos} testID="query-reply-photo" />
+              </View>
+              <TouchableOpacity style={[styles.sendBtn, busy && { opacity: 0.6 }]} onPress={() => act(null)} disabled={busy} testID="query-send-reply">
+                {busy ? <ActivityIndicator color="#FFF" /> : (<><Ionicons name="send" size={15} color="#FFF" /><Text style={styles.actText}>Send reply</Text></>)}
+              </TouchableOpacity>
               <View style={styles.btnRow}>
-                <TouchableOpacity style={[styles.actBtn, { backgroundColor: colors.info }]} onPress={() => act("in_progress")} disabled={busy}>
+                <TouchableOpacity style={[styles.actBtn, { backgroundColor: colors.info }]} onPress={() => act("in_progress")} disabled={busy} testID="progress-query">
                   <Text style={styles.actText}>In progress</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.actBtn, { backgroundColor: colors.success }]} onPress={() => act("resolved")} disabled={busy} testID="resolve-query">
                   <Text style={styles.actText}>Resolve</Text>
                 </TouchableOpacity>
               </View>
-              <TouchableOpacity style={styles.rejectBtn} onPress={() => act("rejected")} disabled={busy}>
+              <TouchableOpacity style={styles.rejectBtn} onPress={() => act("rejected")} disabled={busy} testID="reject-query">
                 <Text style={styles.rejectText}>Reject query</Text>
               </TouchableOpacity>
               </>)}
               <View style={{ height: 20 }} />
             </ScrollView>
+            </KeyboardAvoidingView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -144,7 +158,7 @@ export default function Queries() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 8 },
-  backBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.surface },
+  backBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.surface },
   topTitle: { fontWeight: "800", color: colors.text, fontSize: 16 },
   kpiRow: { flexDirection: "row", gap: 8, paddingHorizontal: 12, marginBottom: 8 },
   kpi: { flex: 1, backgroundColor: "#FFF", borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 11, alignItems: "center" },
@@ -171,7 +185,8 @@ const styles = StyleSheet.create({
   desc: { color: colors.text, fontSize: 13.5, marginTop: 10, lineHeight: 19, backgroundColor: colors.surface, padding: 12, borderRadius: 10 },
   fieldLabel: { color: colors.textSecondary, fontSize: 11.5, fontWeight: "700", marginTop: 14, marginBottom: 6 },
   input: { backgroundColor: "#FFF", borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, minHeight: 60, color: colors.text, fontSize: 14 },
-  btnRow: { flexDirection: "row", gap: 8, marginTop: 14 },
+  btnRow: { flexDirection: "row", gap: 8, marginTop: 10 },
+  sendBtn: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary, height: 48, borderRadius: 10, marginTop: 12 },
   actBtn: { flex: 1, alignItems: "center", paddingVertical: 13, borderRadius: 10 },
   actText: { color: "#FFF", fontWeight: "800", fontSize: 14 },
   rejectBtn: { alignItems: "center", paddingVertical: 12, marginTop: 8 },

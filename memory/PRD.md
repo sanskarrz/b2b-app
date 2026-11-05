@@ -244,3 +244,10 @@ New `backend/distributor_ops.py` (`ops_router`):
 - Manual next-delivery timestamp + "Updated" label shown in search/compare.
 - ERP section & barcode UI removed. Pharmacy online pay now reduces credit_used + notifies distributor.
 - Demo logins table in test_credentials.md.
+
+## Iteration 22–23 (Orders / Returns / Query Management)
+- Distributor order details open (GET /orders/{id} supports distributor viewer; delivery=assigned only, field_sales=taken_by only); error/retry state instead of endless loader; all distributor order cards tappable.
+- Returns only from received (delivered) orders, product-wise qty (GET /retail/returnable-orders, POST /retail/returns/flag {order_id, items[{line,qty}]}); caps by received − already returned; duplicates summed.
+- Query Management threads: QueryThread component (history, returned items, Open order link); distributor reply with photos (PATCH note/photo_file_ids); pharmacy reply with photos (POST /disputes/{id}/reply, reopens resolved/rejected); return status synced with query status.
+- Distributor tab bar: standard labels/icons with safe-area padding; hidden on secondary screens.
+- Tested: iteration 22 + 23 (all fixes pass).

@@ -73,6 +73,7 @@ export default function DistributorOrders() {
     const isDispatched = o.status === "dispatched";
     return (
       <View style={styles.card}>
+        <TouchableOpacity onPress={() => router.push(`/order/${o.id}`)} testID={`d-order-card-${o.id}`}>
         <View style={styles.cardHead}>
           <View style={{ flex: 1 }}>
             <Text style={styles.code}>{o.code}</Text>
@@ -86,8 +87,10 @@ export default function DistributorOrders() {
           <Text style={styles.meta}>{(o.items || []).length} items • {formatINRFull(o.total)}</Text>
           {o.payment_method && <Text style={styles.metaPill}>{o.payment_method === "credit" ? "📑 Credit" : "💵 Cash"}</Text>}
         </View>
+        </TouchableOpacity>
         {/* Actions */}
-        {(isNew || isAccepted || isDispatched) && (
+        {(
+
           <View style={styles.actions}>
             {isNew && (
               <>
@@ -112,7 +115,7 @@ export default function DistributorOrders() {
                 <Text style={styles.actionPrimaryText}>Mark Delivered</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.viewBtn} onPress={() => router.push(`/order/${o.id}`)}>
+            <TouchableOpacity style={styles.viewBtn} onPress={() => router.push(`/order/${o.id}`)} testID={`d-order-view-${o.id}`}>
               <Ionicons name="open-outline" size={16} color={colors.text} />
             </TouchableOpacity>
           </View>
@@ -187,7 +190,7 @@ const styles = StyleSheet.create({
   searchWrap: { flexDirection: "row", alignItems: "center", gap: 6, marginHorizontal: 12, marginTop: 4, paddingHorizontal: 10, backgroundColor: colors.surface, borderRadius: 10, height: 38, borderWidth: 1, borderColor: colors.border },
   searchInput: { flex: 1, color: colors.text, fontSize: 13 },
 
-  tabsScroll: { marginTop: 10, flexGrow: 0 },
+  tabsScroll: { marginTop: 10, flexGrow: 0, flexShrink: 0 },
   tab: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: colors.border, marginRight: 8, backgroundColor: colors.surface },
   tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   tabText: { color: colors.textSecondary, fontWeight: "700", fontSize: 12 },
@@ -211,7 +214,7 @@ const styles = StyleSheet.create({
   actionGhost: { borderWidth: 1, borderColor: colors.border },
   actionPrimaryText: { color: "#FFF", fontWeight: "800", fontSize: 12 },
   actionGhostText: { color: colors.textSecondary, fontWeight: "700", fontSize: 12 },
-  viewBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
+  viewBtn: { width: 44, height: 44, marginLeft: "auto", alignItems: "center", justifyContent: "center", backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
 
   empty: { alignItems: "center", marginTop: 60, gap: 8 },
   emptyText: { color: colors.textSecondary, fontSize: 14 },

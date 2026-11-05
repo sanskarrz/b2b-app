@@ -57,7 +57,7 @@ export default function More() {
         { icon: "heart-outline", label: "Favourites & Watchlist", onPress: () => router.push("/favourites"), testID: "more-favs" },
         { icon: "document-text-outline", label: "Credit / Debit Notes", onPress: () => router.push("/credit-note/new"), testID: "more-cn" },
         { icon: "list-outline", label: "Shortbook (Notes, Voice & Queries)", onPress: () => router.push("/shortbook"), testID: "more-shortbook" },
-        { icon: "return-up-back-outline", label: "Returns & Bill Flags", onPress: () => router.push("/returns"), testID: "more-returns" },
+        { icon: "return-up-back-outline", label: "Returns (Received Orders)", onPress: () => router.push("/returns"), testID: "more-returns" },
         { icon: "flag-outline", label: "My Flags & Queries", onPress: () => router.push("/disputes"), testID: "more-disputes" },
         { icon: "cube-outline", label: "Bulk Order", onPress: () => router.push("/bulk-order"), testID: "more-bulk" },
       ],

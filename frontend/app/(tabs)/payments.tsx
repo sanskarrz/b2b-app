@@ -108,7 +108,7 @@ export default function Payments() {
             <Text style={styles.accLabel}>Paid 30d</Text>
             <Text style={styles.accVal}>{formatINRFull(accSummary.paid_last_30d)}</Text>
           </View>
-          <TouchableOpacity style={styles.accTile} onPress={() => router.push("/returns")}>
+          <TouchableOpacity style={styles.accTile} onPress={() => router.push("/disputes")} testID="acc-onhold">
             <View style={[styles.accIcon, { backgroundColor: colors.warningBg }]}>
               <Ionicons name="lock-closed" size={14} color={colors.warning} />
             </View>

@@ -38,6 +38,7 @@ CATEGORY_LABELS = {
     "no_supply": "No Supply", "rate_scheme": "Rate/Scheme Issue", "return": "Return", "credit": "Credit", "other": "Other",
 }
 STOCK_REASONS = {"damage", "expiry", "correction", "theft"}
+STATUS_TEXT = {"open": "Open", "in_progress": "In progress", "resolved": "Resolved", "rejected": "Rejected"}
 
 
 async def _dist_any(user: dict) -> dict:
@@ -147,6 +148,7 @@ class DisputeReq(BaseModel):
     mode: Optional[str] = None  # sellable | issue (returns)
     source: Optional[str] = None  # shortbook | returns | order | manual
     note_id: Optional[str] = None
+    items: Optional[List[dict]] = None  # returned lines: {name, qty, price, amount, batch}
 
 
 async def create_dispute_doc(req: DisputeReq, user: dict) -> dict:
@@ -168,7 +170,7 @@ async def create_dispute_doc(req: DisputeReq, user: dict) -> dict:
         "transcript": (req.transcript or "").strip() or None,
         "bill_ids": req.bill_ids or [], "bill_numbers": req.bill_numbers or [],
         "mode": req.mode if req.mode in ("sellable", "issue") else None,
-        "source": req.source or "manual", "note_id": req.note_id,
+        "source": req.source or "manual", "note_id": req.note_id, "items": req.items or [],
         "id": str(uuid.uuid4()), "code": _gen_code("DSP"),
         "distributor_id": req.distributor_id, "distributor_name": d.get("short_name"),
         "user_id": user["id"], "customer_name": user.get("shop_name") or user.get("name") or user.get("email"),
@@ -213,7 +215,76 @@ async def unflag_dispute(dispute_id: str, user: dict = Depends(get_current_user)
 @feature_router.get("/disputes")
 async def my_disputes(user: dict = Depends(get_current_user)):
     rows = await db.disputes.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(300)
+    await _attach_linked_orders(rows)
     return rows
+
+
+async def _attach_linked_orders(rows: List[dict]) -> None:
+    """Resolve the order behind each query (direct order_id, or via its bill numbers)."""
+    ids = {r["order_id"] for r in rows if r.get("order_id")}
+    bills = {b for r in rows if not r.get("order_id") for b in (r.get("bill_numbers") or [])}
+    if not ids and not bills:
+        return
+    orders = await db.orders.find(
+        {"$or": [{"id": {"$in": list(ids)}}, {"invoice_number": {"$in": list(bills)}}, {"code": {"$in": list(bills)}}]},
+        {"_id": 0, "id": 1, "code": 1, "invoice_number": 1, "distributor_id": 1, "user_id": 1}).to_list(1000)
+    by_id = {o["id"]: o for o in orders}
+    by_bill = {}
+    for o in orders:
+        for k in (o.get("invoice_number"), o.get("code")):
+            if k:
+                by_bill[(k, o["distributor_id"], o["user_id"])] = o
+    for r in rows:
+        o = by_id.get(r.get("order_id")) if r.get("order_id") else next(
+            (by_bill.get((b, r["distributor_id"], r["user_id"])) for b in (r.get("bill_numbers") or [])
+             if by_bill.get((b, r["distributor_id"], r["user_id"]))), None)
+        if o:
+            r["linked_order_id"], r["linked_order_code"] = o["id"], o.get("invoice_number") or o.get("code")
+
+
+class QueryReplyReq(BaseModel):
+    text: Optional[str] = None
+    photo_file_ids: Optional[List[str]] = None
+
+
+@feature_router.post("/disputes/{dispute_id}/reply")
+async def pharmacy_reply(dispute_id: str, req: QueryReplyReq, user: dict = Depends(get_current_user)):
+    """Pharmacy adds a message / photos to its own query thread."""
+    disp = await db.disputes.find_one({"id": dispute_id, "user_id": user["id"]}, {"_id": 0})
+    if not disp:
+        raise HTTPException(404, "Query not found")
+    if disp.get("status") == "closed":
+        raise HTTPException(400, "This query is closed")
+    text, photos = (req.text or "").strip(), req.photo_file_ids or []
+    if not text and not photos:
+        raise HTTPException(400, "Write a message or attach a photo")
+    if photos:
+        await db.files.update_many({"id": {"$in": photos}, "owner_id": user["id"]},
+                                   {"$addToSet": {"shared_with": disp["distributor_id"]}})
+    act = {"at": iso(now_utc()), "by": "customer", "author": disp.get("customer_name"), "text": text or "Photo attached", "photo_file_ids": photos}
+    upd: dict = {"updated_at": iso(now_utc())}
+    if disp.get("status") in ("resolved", "rejected"):  # retailer is not satisfied → reopen
+        if disp.get("status") == "rejected" and disp.get("source") == "returns" and disp.get("order_id"):
+            # reopening re-counts the returned qty — make sure it still fits what was received
+            o = await db.orders.find_one({"id": disp["order_id"]}, {"_id": 0, "items": 1}) or {}
+            used: dict = {}
+            async for r in db.returns.find({"order_id": disp["order_id"], "user_id": user["id"], "status": {"$ne": "rejected"}}, {"_id": 0, "items": 1}):
+                for it in r.get("items") or []:
+                    used[it["line"]] = used.get(it["line"], 0) + it["qty"]
+            lines = o.get("items") or []
+            for it in disp.get("items") or []:
+                ln = lines[it["line"]] if it["line"] < len(lines) else {}
+                got = int(ln.get("qty") or 0) + int(ln.get("free_qty") or 0)
+                if used.get(it["line"], 0) + it["qty"] > got:
+                    raise HTTPException(400, f"{it.get('name')} was already returned again — this query can't be reopened")
+        upd["status"] = "open"
+        act["text"] += " (reopened)"
+    await db.disputes.update_one({"id": dispute_id}, {"$set": upd, "$push": {"activities": act}})
+    if upd.get("status") == "open" and disp.get("source") == "returns":  # reopened → return pending again
+        await db.returns.update_one({"dispute_id": dispute_id}, {"$set": {"status": "requested", "updated_at": iso(now_utc())}})
+    await notify(f"Reply on {disp.get('code')}", f"{disp.get('customer_name')}: {act['text'][:80]}",
+                 distributor_id=disp["distributor_id"], kind="query", link="/d/queries")
+    return {"success": True, "activity": act}
 
 
 @feature_router.get("/distributor/me/disputes")
@@ -225,6 +296,7 @@ async def dist_disputes(type: Optional[str] = None, status: Optional[str] = None
     if status:
         q["status"] = status
     rows = await db.disputes.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    await _attach_linked_orders(rows)
     counts_rows = await db.disputes.find({"distributor_id": d["id"]}, {"_id": 0, "status": 1, "type": 1}).to_list(2000)
     counts = {"open": 0, "in_progress": 0, "resolved": 0, "rejected": 0, "closed": 0}
     for r in counts_rows:
@@ -236,6 +308,7 @@ class DisputeUpdateReq(BaseModel):
     status: Optional[str] = None  # open | in_progress | resolved | rejected
     resolution: Optional[str] = None
     note: Optional[str] = None
+    photo_file_ids: Optional[List[str]] = None
 
 
 @feature_router.patch("/distributor/me/disputes/{dispute_id}")
@@ -244,21 +317,33 @@ async def update_dispute(dispute_id: str, req: DisputeUpdateReq, user: dict = De
     disp = await db.disputes.find_one({"id": dispute_id, "distributor_id": d["id"]}, {"_id": 0})
     if not disp:
         raise HTTPException(404, "Query not found")
+    if disp.get("status") == "closed":
+        raise HTTPException(400, "This query was already closed by the retailer")
     upd: dict = {"updated_at": iso(now_utc())}
-    acts = disp.get("activities", [])
+    acts = list(disp.get("activities", []))
+    photos = req.photo_file_ids or []
+    author = user.get("name") or d.get("short_name")
     if req.status:
         if req.status not in {"open", "in_progress", "resolved", "rejected"}:
             raise HTTPException(400, "Invalid status")
         upd["status"] = req.status
-        acts.append({"at": iso(now_utc()), "by": "distributor", "text": f"Status → {req.status}"})
+        acts.append({"at": iso(now_utc()), "by": "distributor", "author": author, "kind": "status",
+                     "text": f"Status → {STATUS_TEXT.get(req.status, req.status)}"})
     if req.resolution is not None:
         upd["resolution"] = req.resolution.strip() or None
-    if req.note:
-        acts.append({"at": iso(now_utc()), "by": "distributor", "text": req.note.strip()})
+    if (req.note or "").strip() or photos:
+        if photos:
+            await db.files.update_many({"id": {"$in": photos}, "owner_id": user["id"]},
+                                       {"$addToSet": {"shared_with": disp["user_id"]}})
+        acts.append({"at": iso(now_utc()), "by": "distributor", "author": author,
+                     "text": (req.note or "").strip() or "Photo attached", "photo_file_ids": photos})
+    if len(upd) == 1 and len(acts) == len(disp.get("activities", [])):
+        raise HTTPException(400, "Nothing to update")
     upd["activities"] = acts
-    if disp.get("status") == "closed":
-        raise HTTPException(400, "This query was already closed by the retailer")
     await db.disputes.update_one({"id": dispute_id}, {"$set": upd})
+    if req.status in ("resolved", "rejected") and disp.get("source") == "returns":  # keep the linked return in sync
+        await db.returns.update_one({"dispute_id": dispute_id}, {"$set": {
+            "status": "approved" if req.status == "resolved" else "rejected", "updated_at": iso(now_utc())}})
     msg = f"{disp.get('code')} — {disp.get('title')}: " + (f"status {req.status}" if req.status else "new update")
     if req.status in ("resolved", "rejected"):
         msg += ". Please review and unflag it."

@@ -1,0 +1,36 @@
+{
+  "summary": "Retested the 7 fixes from iteration 22. All 7 work. Backend: 22 of 23 tests pass across tests/test_iteration23_retest.py (new) and test_iteration22_returns_queries.py. The 1 failure is a new edge-case bug, not one of the listed fixes. (1) Query modal scroll is FIXED. On /d/queries (owner) and /disputes (demo) at 390x844, a thread with 10 messages scrolls with the mouse wheel. Send, In progress, Resolve, Reject and Confirm & Unflag scroll into view and are hit-testable, and a real click on In progress changed the status. (2) Duplicate return lines are added together: over the cap gives 400 'only N left to return', and within the cap they merge into a single line. (3) /d/orders: 41 cards / 41 view icons on All and 12/12 on Delivered. Card tap and view icon both open /order/[id] with full detail (no infinite loader). (4) Filter chips are 28px tall and no longer squashed. (5) GET /orders/{id}: delivery and field_sales get 404 for orders that are not theirs; owner and manager can see all. (6) A pharmacy reply on a resolved or rejected returns query sets the return back to requested. Checked in the API and in the UI with the Send button. (7) Returns history colours differ (requested amber, rejected red, approved green in code). The d/queries and disputes back buttons and the d/orders view button are 44px, but the shared TopBar back button is still 40px. No deprecated Expo packages were in scope.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/disputes/{id}/reply (reopen) + /retail/returns/flag", "issue": "Reopening a rejected returns query sets the return back to 'requested' without re-checking the returnable qty. Repro: flag all returnable qty, distributor rejects (qty is released), pharmacy flags the same qty again, then replies on the first query (reopens it). Result: returned_qty 14 > received_qty 9. Test: tests/test_iteration23_retest.py::TestReopenOverReserve"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/d/orders", "issues": ["Filter chips are 28px tall, below the 44px touch target", "Delivered/Cancelled cards show an action row with only the view icon, which adds about 50px of empty height per card"]},
+      {"screen": "Shared TopBar (/returns, /order/[id])", "issues": ["topbar-back iconBtn is 40x40 (src/components/TopBar.tsx:70), not 44"]},
+      {"screen": "/returns history", "issues": ["REQUESTED status uses amber #F59E0B text on white, about 2.1:1 contrast, which is low"]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration23_retest.py", "/app/backend/tests/test_iteration22_returns_queries.py", "/app/test_reports/pytest/pytest_iter23.xml"],
+  "action_items": [
+    "LOW: In pharmacy_reply (client_features.py:270), when reopening a rejected returns query, re-validate each item's qty against _returned_qty, excluding this return. If it would exceed the qty received, keep the return rejected or return 400.",
+    "LOW: Bump TopBar iconBtn to 44x44 or add hitSlop, and the d/orders filter chips to 44px min height or add hitSlop.",
+    "LOW: Use a darker amber (e.g. #B45309) for the REQUESTED status text in returns.tsx:152."
+  ],
+  "critical_code_review_comments": [
+    "get_order scoping is correct. Note that an owner using 'operational roles' still has role=owner, so they see all orders. That is the intended behaviour.",
+    "flag_returns merges duplicate lines and drops qty<=0 entries before validating. This is correct."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration23_retest.py"],
+  "success_rate": {"backend": "96% (22/23; the 1 failure is a new edge case)", "frontend": "100% of retested items"},
+  "seed_data_creation": "Created TEST_ returns disputes on demo/dist-1 (incl. DSP-78140 long thread). All were rejected and unflagged (closed) by id after the run. Rejected return rows stay in demo's My Returns history because the API cannot delete returns, so demo now shows about 26 rejected TEST returns from this and earlier runs.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend && EXPO_PUBLIC_BACKEND_URL=<url> pytest tests/test_iteration23_retest.py tests/test_iteration22_returns_queries.py. TestReopenOverReserve fails until the reopen re-validation is added. /d/orders opens on the 'New' tab by default, which is often empty. Click the 'All' or 'Delivered' text chip (the chips have no testIDs). The modal scroll can be checked with page.mouse.wheel over the modal.",
+  "rca_of_issue": "Over-reserve on reopen: _returned_qty counts every return that is not rejected. reject releases the qty, and pharmacy_reply flips the return back to 'requested' with no cap check, so any qty re-flagged in between gets counted twice."
+}

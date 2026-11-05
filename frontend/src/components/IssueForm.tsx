@@ -36,7 +36,7 @@ export function issuePayload(v: IssueValue) {
   };
 }
 
-export function IssueForm({ value, onChange, titleLabel = "Product name" }: { value: IssueValue; onChange: (v: IssueValue) => void; titleLabel?: string }) {
+export function IssueForm({ value, onChange, titleLabel = "Product name", hideTitle = false }: { value: IssueValue; onChange: (v: IssueValue) => void; titleLabel?: string; hideTitle?: boolean }) {
   const set = (p: Partial<IssueValue>) => onChange({ ...value, ...p });
   return (
     <View style={{ gap: 14 }}>
@@ -53,6 +53,7 @@ export function IssueForm({ value, onChange, titleLabel = "Product name" }: { va
           })}
         </View>
       </View>
+      {!hideTitle && (
       <View>
         <Text style={styles.label}>{titleLabel}</Text>
         <TextInput
@@ -60,6 +61,7 @@ export function IssueForm({ value, onChange, titleLabel = "Product name" }: { va
           placeholder="e.g. Azee 500 Tab" placeholderTextColor={colors.textTertiary} testID="issue-title"
         />
       </View>
+      )}
       <View>
         <Text style={styles.label}>Details</Text>
         <TextInput

@@ -1,0 +1,28 @@
+{
+  "summary": "Build checks: expo-doctor passed 18/18. 'expo config --type prebuild' resolves and lists all 7 plugins. Android and iOS prebuild ran in a temp copy and both completed. Permissions in the generated AndroidManifest: ACCESS_FINE_LOCATION and ACCESS_COARSE_LOCATION are declared. CAMERA is not declared directly but comes in from expo-image-picker's library manifest when the manifests merge. RECORD_AUDIO is declared with tools:node=\"remove\", which BLOCKS the permission. CRITICAL: the expo-image-picker option \"microphonePermission\": false makes the plugin call withBlockedPermissions(['android.permission.RECORD_AUDIO']). That strips the RECORD_AUDIO permission that expo-audio's library manifest adds, so voice notes (VoiceRecorder.tsx) can't record on an Android build. iOS Info.plist is correct: NSMicrophone, NSCamera, NSPhotoLibrary and NSLocationWhenInUse all carry the custom strings. I confirmed the fix in a second temp copy: with the flag removed, prebuild outputs a plain RECORD_AUDIO permission. Backend: GET /api/products?limit=5 returns products with no _id. The product count was 2623 before a supervisor backend restart and 2623 after, so the insert-only top-up works. UI smoke at 390x844 passed with no page errors: demo@rxtech.com OTP login to /home, all 5 tabs, and /search rendered; owner@rxtech.com OTP login to /d/home, and the Stock tab shows 'Inventory 196 SKUs' with 89 inv-row items rendered.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "expo-image-picker plugin config", "issue": "\"microphonePermission\": false blocks android.permission.RECORD_AUDIO (the generated manifest has tools:node=\"remove\"). It overrides expo-audio, so recording in VoiceRecorder fails on an Android build. Reference: /app/frontend/app.json:49"}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration20_seed_persistence.py", "/app/test_reports/pytest/iteration20.xml"],
+  "action_items": [
+    "HIGH: In /app/frontend/app.json, remove \"microphonePermission\": false from the expo-image-picker plugin options. You can leave the key out or set it to a string. Verified: prebuild then outputs <uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>. If the goal was to hide the image-picker microphone prompt, that doesn't apply here, because expo-audio needs the permission anyway.",
+    "Optional: iOS NSLocationAlways* strings fall back to the default 'Allow $(PRODUCT_NAME)…' text. This is harmless; only WhenInUse is used."
+  ],
+  "critical_code_review_comments": [
+    "seed_database is now insert-only: it adds only missing seed ids and never deletes. Good. On a fresh DB, 'current < target' is true, so the legacy 12-product fallback below it can never run. It is dead code and could be removed.",
+    "backend.err.log contains old AttributeError traces ('str' object has no attribute 'get') in distributor_inventory_update. Their line numbers don't match the current code, so they look stale and none appeared after the restart."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration20_seed_persistence.py (new test only)"],
+  "success_rate": {"backend": "100% (2/2)", "frontend": "100% UI smoke; Android build config has 1 critical permission issue"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Test prebuild only in a temp copy: tar the project excluding node_modules/.metro-cache, symlink node_modules, then run 'CI=1 npx expo prebuild --platform android --no-install'. Then grep RECORD_AUDIO in android/app/src/main/AndroidManifest.xml and make sure there is no tools:node=\"remove\". /app/frontend has no android/ios folders. git shows package.json as modified and yarn.lock as untracked; that was already the case before this run, and the tester did not touch them.",
+  "rca_of_issue": "When the expo-image-picker config plugin gets microphonePermission === false, it calls AndroidConfig.Permissions.withBlockedPermissions(['android.permission.RECORD_AUDIO']). That writes tools:node=\"remove\" into the app manifest, and the manifest merger then drops expo-audio's RECORD_AUDIO."
+}

@@ -300,14 +300,15 @@ async def seed_database():
                 {"$set": {k: v for k, v in d.items() if k in ("credit_days", "settlement_discount_pct", "state_code")}},
             )
 
-    # Refresh products: if catalog is significantly larger than existing, re-seed
+    # Top up the catalogue without deleting anything (keeps distributor stock/scheme edits)
     current = await db.products.count_documents({})
     if current < target_product_count:
-        # Never delete catalogue rows a distributor imported from their own ERP.
-        await db.products.delete_many({"source": {"$ne": "erp_import"}})
         big_catalog = build_products()
-        await db.products.insert_many([{**p} for p in big_catalog])
-        logger.info(f"Catalog refreshed: {current} → {len(big_catalog)} products")
+        have = {p["id"] for p in await db.products.find({}, {"_id": 0, "id": 1}).to_list(200000)}
+        missing = [{**p} for p in big_catalog if p["id"] not in have]
+        for i in range(0, len(missing), 500):
+            await db.products.insert_many(missing[i:i + 500])
+        logger.info(f"Catalog topped up: {current} → {current + len(missing)} products")
         return
 
     # Legacy code below kept for backward-compat seeding fallback
@@ -1124,10 +1125,23 @@ async def list_orders(status: Optional[str] = None, user: dict = Depends(get_cur
 
 @api_router.get("/orders/{order_id}")
 async def get_order(order_id: str, user: dict = Depends(get_current_user)):
+    """Pharmacy sees its own orders; distributor staff see orders placed with their distributor."""
     o = await db.orders.find_one({"id": order_id, "user_id": user["id"]}, {"_id": 0})
-    if not o:
-        raise HTTPException(404, "Not found")
-    return o
+    if o:
+        return {**o, "viewer": "pharmacy"}
+    did = user.get("owned_distributor_id") or user.get("distributor_id")
+    if did and user.get("role") in ("owner", "manager", "field_sales", "delivery"):
+        q: dict = {"id": order_id, "distributor_id": did}
+        if user.get("role") == "delivery":  # delivery staff: only orders assigned to them
+            q["assigned_to"] = user["id"]
+        elif user.get("role") == "field_sales":  # field sales: only orders they took
+            q["taken_by"] = user["id"]
+        o = await db.orders.find_one(q, {"_id": 0})
+        if o:
+            cust = await db.users.find_one({"id": o["user_id"]}, {"_id": 0, "shop_name": 1, "name": 1, "phone": 1}) or {}
+            return {**o, "viewer": "distributor", "customer_name": cust.get("shop_name") or cust.get("name"),
+                    "customer_phone": cust.get("phone")}
+    raise HTTPException(404, "Order not found")
 
 
 # ============================================================

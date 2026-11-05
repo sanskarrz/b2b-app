@@ -1,20 +1,15 @@
-// Distributor tabs layout — 5 sections for the distributor-side app.
+// Distributor tabs layout — 6 main sections for the distributor-side app.
 // On desktop web (>= 900px) a persistent left sidebar replaces the bottom tabs.
+// Secondary screens (with their own back button) hide the tab bar so nothing overlaps.
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { View, StyleSheet, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "@/src/theme";
 import { WebShell, useIsWideWeb, NavSection } from "@/src/components/WebSidebar";
 
-function Tab({ name, icon, focused }: { name: string; icon: any; focused: boolean }) {
-  return (
-    <View style={styles.tabItem}>
-      <Ionicons name={focused ? icon : `${icon}-outline` as any} size={22} color={focused ? colors.primary : colors.textSecondary} />
-      <Text style={[styles.tabLabel, focused && { color: colors.primary, fontWeight: "800" }]}>{name}</Text>
-    </View>
-  );
-}
+const icon = (name: string) => ({ color, focused }: { color: string; focused: boolean }) => (
+  <Ionicons name={(focused ? name : `${name}-outline`) as any} size={22} color={color} />
+);
 
 const NAV: NavSection[] = [
   {
@@ -50,35 +45,42 @@ export default function DLayout() {
   const wide = useIsWideWeb();
   const insets = useSafeAreaInsets();
 
+  const hidden = { href: null, tabBarStyle: { display: "none" as const } };
   const screens = [
-    <Tabs.Screen key="home" name="home" options={{ tabBarIcon: ({ focused }) => <Tab name="Home" icon="home" focused={focused} /> }} />,
-    <Tabs.Screen key="orders" name="orders" options={{ tabBarIcon: ({ focused }) => <Tab name="Orders" icon="receipt" focused={focused} /> }} />,
-    <Tabs.Screen key="inventory" name="inventory" options={{ tabBarIcon: ({ focused }) => <Tab name="Stock" icon="cube" focused={focused} /> }} />,
-    <Tabs.Screen key="customers" name="customers" options={{ tabBarIcon: ({ focused }) => <Tab name="Customers" icon="people" focused={focused} /> }} />,
-    <Tabs.Screen key="collections" name="collections" options={{ tabBarIcon: ({ focused }) => <Tab name="Money" icon="cash" focused={focused} /> }} />,
-    <Tabs.Screen key="more" name="more" options={{ tabBarIcon: ({ focused }) => <Tab name="More" icon="grid" focused={focused} /> }} />,
-    <Tabs.Screen key="c" name="customer/[id]" options={{ href: null }} />,
-    <Tabs.Screen key="notif" name="notifications" options={{ href: null }} />,
-    <Tabs.Screen key="mi" name="messages/index" options={{ href: null }} />,
-    <Tabs.Screen key="md" name="messages/[id]" options={{ href: null }} />,
-    <Tabs.Screen key="team" name="team" options={{ href: null }} />,
-    <Tabs.Screen key="leads" name="leads" options={{ href: null }} />,
-    <Tabs.Screen key="deliveries" name="deliveries" options={{ href: null }} />,
-    <Tabs.Screen key="settings" name="settings" options={{ href: null }} />,
-    <Tabs.Screen key="queries" name="queries" options={{ href: null }} />,
-    <Tabs.Screen key="bills" name="bills" options={{ href: null }} />,
-    <Tabs.Screen key="sync" name="sync" options={{ href: null }} />,
-    <Tabs.Screen key="syncdata" name="sync-data" options={{ href: null }} />,
-    <Tabs.Screen key="sci" name="staff-chat/index" options={{ href: null }} />,
-    <Tabs.Screen key="scd" name="staff-chat/[id]" options={{ href: null }} />,
+    <Tabs.Screen key="home" name="home" options={{ title: "Home", tabBarIcon: icon("home") }} />,
+    <Tabs.Screen key="orders" name="orders" options={{ title: "Orders", tabBarIcon: icon("receipt") }} />,
+    <Tabs.Screen key="inventory" name="inventory" options={{ title: "Stock", tabBarIcon: icon("cube") }} />,
+    <Tabs.Screen key="customers" name="customers" options={{ title: "Customers", tabBarIcon: icon("people") }} />,
+    <Tabs.Screen key="collections" name="collections" options={{ title: "Money", tabBarIcon: icon("cash") }} />,
+    <Tabs.Screen key="more" name="more" options={{ title: "More", tabBarIcon: icon("grid") }} />,
+    <Tabs.Screen key="c" name="customer/[id]" options={hidden} />,
+    <Tabs.Screen key="notif" name="notifications" options={hidden} />,
+    <Tabs.Screen key="mi" name="messages/index" options={hidden} />,
+    <Tabs.Screen key="md" name="messages/[id]" options={hidden} />,
+    <Tabs.Screen key="team" name="team" options={hidden} />,
+    <Tabs.Screen key="leads" name="leads" options={hidden} />,
+    <Tabs.Screen key="deliveries" name="deliveries" options={hidden} />,
+    <Tabs.Screen key="settings" name="settings" options={hidden} />,
+    <Tabs.Screen key="queries" name="queries" options={hidden} />,
+    <Tabs.Screen key="bills" name="bills" options={hidden} />,
+    <Tabs.Screen key="sync" name="sync" options={hidden} />,
+    <Tabs.Screen key="syncdata" name="sync-data" options={hidden} />,
+    <Tabs.Screen key="sci" name="staff-chat/index" options={hidden} />,
+    <Tabs.Screen key="scd" name="staff-chat/[id]" options={hidden} />,
   ];
 
   const tabs = (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: wide ? { display: "none" } : { height: 64 + insets.bottom, paddingTop: 6, paddingBottom: 10 + insets.bottom, borderTopColor: colors.border },
-        tabBarShowLabel: false,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textSecondary,
+        tabBarLabelStyle: { fontSize: 10.5, fontWeight: "700" },
+        tabBarItemStyle: { paddingHorizontal: 0 },
+        // Android phones with on-screen buttons report a bottom inset — keep the bar above them
+        tabBarStyle: wide
+          ? { display: "none" }
+          : { height: 62 + insets.bottom, paddingTop: 6, paddingBottom: 8 + insets.bottom, borderTopColor: colors.border, borderTopWidth: 1, backgroundColor: colors.bg },
       }}
     >
       {screens}
@@ -93,8 +95,3 @@ export default function DLayout() {
     </WebShell>
   );
 }
-
-const styles = StyleSheet.create({
-  tabItem: { alignItems: "center", justifyContent: "center", gap: 2 },
-  tabLabel: { fontSize: 10, color: colors.textSecondary, fontWeight: "600" },
-});

@@ -1,127 +1,52 @@
-# Universal ERP Report Import — Any Format, Every Report, Connected Across the App
+# Fix: Android Build Failing on Emergent
 
-Distributors export reports from whatever billing software they run, in whatever column layout it produces, and the app understands it — correcting a layout once teaches it permanently. Every recognised report then flows into the live screens it belongs to, instead of sitting in a separate data viewer.
+The logs show it is the **Android app build** that fails, not the server deploy. The build stops while preparing the Android project because the splash-screen image file is missing. This plan fixes that and the build warnings found in the same log, so APK / Play Store builds go through again.
 
 ## Who it's for
+- The app owner, who needs a working Android build to test voice, GPS and photos on real phones and share the APK.
+- Pharmacies, distributors and staff installing the Android app.
 
-- **Distributor owners and managers** who keep their real books in Medica Ultimate, Marg, Busy, Tally, Unisolve, Vasu or similar, and need the app to mirror that data without manual re-entry.
-- **Field sales staff**, who need the real customer list, each party's credit limit and what they owe before walking into a shop.
-- **Delivery staff**, who need the correct outstanding amount to collect against.
-- **Pharmacies**, who see accurate stock and their own running balance.
+## What the logs say
 
-## The two problems being solved
+**The error that stops the build:**
+- `ENOENT: no such file or directory, open './assets/images/splash-icon.png'`
+- The app settings point to a splash image that doesn't exist in the project, so Android project preparation stops right there.
 
-**1. Column layouts differ between every billing software.** Today the importer matches column names against a fixed list of known names. A column it doesn't recognise is dropped silently, and if it can't identify the report type at all, the sheet is skipped with no explanation and no way to correct it. A distributor whose export says `ITM_DESC` instead of `Product Name` gets nothing, with no indication why.
+**Warnings from the same check (they don't stop the build today, but get fixed too):**
+1. **Colours written in short form:** the app settings use `#000` for the status bar and app icon background. The build expects the full form, `#000000`.
+2. **Icons not square:** `icon.png` and `adaptive-icon.png` are 512×513 pixels instead of 512×512.
+3. **Missing helper package:** the voice-recording package added in the retailer update needs a companion package (`expo-asset`) that isn't installed. Without it the app can crash on real phones.
+4. **Navigation library installed twice:** two copies exist at different versions, which can cause build errors.
+5. **Three Expo packages a little out of date:** `expo`, `expo-constants` and `expo-file-system`, by small patch versions.
 
-**2. Only stock reaches the app.** Party and ledger reports are already parsed and stored, but they stop at the "My System Data" browser. They don't become customers, credit limits, outstanding balances or statements. The data is in the building but not wired to anything.
-
-## Core features and experience
-
-### Teach-it-once column mapping
-
-- Imports stay **one tap**. When the report format is recognised — either a built-in layout or one this distributor has mapped before — the file imports immediately with no questions.
-- A mapping screen appears **only when the app isn't confident**: an unknown export format, or a report type it can't identify. It shows the file's actual columns on one side and the app's fields on the other, with its best guesses pre-filled and unmatched columns marked *Ignored*.
-- The report type is also correctable there, for cases where a layout is ambiguous.
-- Required fields for each report type are called out, so an unusable mapping can't be saved.
-- Saving the mapping stores a **format profile** recognised by that report's column signature. Every later upload of the same format — next month, next quarter — imports silently in one tap.
-- Saved profiles are listed in Data Sync, where they can be renamed, edited or deleted when the billing software changes its export.
-- A single file containing several reports across multiple sheets is handled sheet by sheet, each with its own type and mapping.
-
-### Every report connected to the screens it belongs to
-
-Reports are brought in priority order. In all cases the data lands where staff already look for it, rather than in a separate viewer:
-
-| Report | Where it shows up in the app |
-|---|---|
-| **Stock / Item master** | Already live — Stock screen, pharmacy marketplace, order rates *(built)* |
-| **Party / Customer master** | Customers screen with credit limit, GST, drug licence, phone, area/route; field sales' assigned-customer lists; auto-linked to a pharmacy's app account when GST or phone matches |
-| **Outstanding / Ledger** | Each customer's balance and statement; overdue list; the amount delivery staff collect against; a pharmacy's own balance on their account screen |
-| **Batch & Expiry** | Near-expiry alerts, batch-wise stock on each item |
-| **Sales / Purchase register** | Past sales history per customer and per item; purchase rates behind margin figures |
-| **Company / Manufacturer master** | Browsing and filtering stock by company |
-
-### Imported customers behave like real customers
-
-- A party matched to an existing pharmacy account links to it, so that pharmacy's orders, dues and statements are one continuous record rather than two.
-- A party with no app account still works fully as a customer — field sales can take orders for them, and statements and collections work — so the distributor's offline customers aren't second-class.
-- Credit limits from the ERP are enforced as a **warning** when an order exceeds the limit, not a hard block, so a sale is never lost to stale data.
-
-### Honest handling of two sources of truth
-
-The ERP knows the history; the app knows the orders placed in it. These are kept visibly separate — an **ERP balance** and **app dues**, with a combined total — so nothing is double-counted and any disagreement is visible rather than hidden inside one ambiguous number.
-
-### A result summary that explains itself
-
-After every import, in plain language: the report type found, how many rows were read, which columns matched, **which columns were ignored**, how many records were added versus updated, and what changed in the app — for example *"412 customers added, 38 linked to pharmacy accounts"* or *"₹12.4L outstanding across 380 parties"*. The same summary is kept in import history, so a month-old import can still be explained.
+## Fixes
+- **Splash image:** add a splash image at the expected location. It uses the existing app icon on a plain background, so nothing new needs designing.
+- **Colours:** change `#000` to `#000000` in the app settings.
+- **Icons:** make both icon images exactly square (512×512), keeping the same picture.
+- **Helper package:** install `expo-asset` at the version that matches the Expo version.
+- **Duplicate navigation library:** remove the duplicate so the app uses a single, matching version.
+- **Patch updates:** bring the three Expo packages to the versions the build checker expects.
+- **No other changes:** app features, screens and server code stay as they are.
 
 ## User flow
-
-**First time with an unfamiliar export**
-
-1. Owner uploads a CSV/Excel export, or pastes a Drive/Sheets link, in Data Sync.
-2. The app reads it and can't confidently place the columns, so it shows the mapping screen with its best guesses.
-3. Owner corrects a few columns and confirms. The import runs.
-4. The result summary states what was imported and where it now appears. The layout is remembered.
-
-**Every time after that**
-
-1. Owner uploads next month's export — or auto-sync picks it up from the saved Drive link, unattended.
-2. It imports in one tap with no questions, because the format is recognised.
-3. Stock quantities and rates refresh, new customers appear, balances update, nothing duplicates.
-
-**The payoff downstream**
-
-- Field sales opens a customer and sees their real credit limit, outstanding and buying history.
-- Delivery sees the correct amount to collect.
-- A pharmacy sees accurate stock and their own balance.
+1. The fixes above are applied.
+2. The preview app is checked so it still opens and works.
+3. The deployment health check runs to confirm nothing else would block the build.
+4. The user generates the Android build again from Publish on Emergent.
+5. If the build fails again, the new log is read and fixed the same way.
 
 ## UI/UX feel
-
-- Matches the existing distributor panel: desktop sidebar on wide screens, bottom tabs on phones.
-- The mapping screen is a plain two-column list — the file's column on the left, a dropdown of app fields on the right — readable on a phone, comfortable on desktop. No spreadsheet grid to fight with.
-- Guesses are pre-filled and visibly marked as guesses, so the task is reviewing rather than filling in from scratch.
-- Ignored columns are stated openly instead of quietly discarded, so nothing disappears without the distributor knowing.
-- Import stays a single primary action. The mapping screen is an exception, never a routine step.
+- No visible change inside the app.
+- The launch (splash) screen shows the app icon on a dark background, matching the current colours.
 
 ## Implementation phases
-
-### Phase 1 — built now
-
-- Confidence-based mapping screen with pre-filled guesses, correctable report type, and required-field checks.
-- Saved per-distributor format profiles, recognised automatically on later uploads; manageable in Data Sync.
-- **Party / Customer master** imported into the live Customers screen — credit limit, GST, drug licence, phone, area/route — with auto-linking to pharmacy accounts on GST or phone.
-- **Outstanding / Ledger** imported into customer balances, statements, the overdue list and the delivery collection amount; visible to the pharmacy on their own account.
-- ERP balance and app dues shown separately with a combined total.
-- Self-explaining import result summary, including ignored columns, retained in history.
-- Repeat imports update in place and never duplicate, including through auto-sync.
-
-### Phase 2
-
-- **Batch & Expiry** import: batch-wise stock on each item, near-expiry alerts and a dated expiry list.
-- **Company / Manufacturer master** import: browse and filter stock by company.
-- Invite flow to turn an imported offline customer into a logged-in pharmacy account.
-
-### Phase 3
-
-- **Sales / Purchase register** import: per-customer and per-item sales history, purchase rates feeding real margin figures.
-- Reorder suggestions from sales history against current stock.
-- Multi-report folder sync — one Drive folder holding several reports, picked up unattended on a schedule.
+- **Phase 1 (now, MVP):** add the splash image, fix the colours and icon sizes, add the missing package, remove the duplicate, apply the patch updates, re-check, and the user rebuilds the Android app.
+- **Phase 2:** confirm the iOS build passes the same checks before the first iOS build.
+- **Phase 3:** a short pre-build checklist (images present, colours valid, packages matched), run before each future build.
 
 ## Assumptions
-
-Decisions made without asking:
-
-- **The mapping screen is an exception, not a step.** Known and remembered formats import in one tap with no screen, honouring the preference for a single action. The screen appears only on low confidence — otherwise "remember the mapping" and "keep it one tap" would contradict each other.
-- **No preview before writing.** Imports apply immediately and are explained afterwards, as requested. Repeat imports update in place rather than duplicating, which is what makes this safe without a preview.
-- **ERP balances are never silently merged** into app-calculated dues. They are shown side by side with a combined total.
-- **Party auto-link order is GSTIN, then phone, then name with city.** A tie or a weak match is left unlinked rather than guessed, since a wrong link merges two businesses' money.
-- **Credit limits warn rather than block.** Imported limits can be months old, so a hard block risks refusing a legitimate order.
-- **Pharmacies can see their own outstanding balance**, not just the distributor.
-- **Format profiles stay private to each distributor.** No mapping or data crosses between distributors. The built-in synonym list continues to improve for everyone.
-- **Unmatched columns are kept visible but unused** — reported as ignored, never invented into fields.
-- **Common Indian date formats are accepted** (dd/mm/yyyy, dd-mm-yy, dd.mm.yyyy and similar), along with currency symbols, thousands separators and bracketed negatives.
-- **Blank or negative stock counts as zero** rather than being rejected.
-- **Report titles, totals, page footers and separator rows are skipped**, as they already are for stock.
-- **Only CSV and Excel (.xlsx)** are supported, as agreed. Old .xls files prompt a save-as; raw database backups remain out of scope.
-- **Large files are processed in batches** so a multi-thousand-row monthly export doesn't strain the server — the same caution that followed the earlier outage.
-- Phase 1 covers the first two priorities. The remaining three reports are already ranked and scheduled rather than dropped.
+- The failure is the Android app build: the log is an EAS Android build that failed at "Prebuild". Server deploy is not the problem.
+- The splash image reuses the existing app icon on a black (`#000000`) background. Black is already the configured splash colour.
+- Squaring the icons removes one row of pixels. The icon looks the same.
+- Package updates stay within the current Expo version, so nothing breaks.
+- The user starts the new build; it can't be triggered from here.

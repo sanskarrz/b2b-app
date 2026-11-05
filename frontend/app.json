@@ -15,7 +15,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000"
+        "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
       "package": "app.emergent.wireframetoapp130449389"
@@ -33,11 +33,26 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#000"
+          "backgroundColor": "#000000"
         }
       ],
       "expo-font",
-      "expo-audio"
+      [
+        "expo-audio",
+        { "microphonePermission": "Record voice notes for your shortbook and queries" }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Attach photos of damaged or wrong items",
+          "cameraPermission": "Snap photos of items and delivery proof"
+        }
+      ],
+      [
+        "expo-location",
+        { "locationWhenInUsePermission": "Show the nearest distributors and confirm deliveries" }
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

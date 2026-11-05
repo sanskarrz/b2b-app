@@ -6,7 +6,7 @@ import {
   ActivityIndicator,
   TouchableOpacity,
 } from "react-native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -23,12 +23,30 @@ export default function OrderDetail() {
   const router = useRouter();
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
     api(`/orders/${id}`)
       .then(setOrder)
+      .catch((e: any) => setError(e?.message || "Could not load this order"))
       .finally(() => setLoading(false));
   }, [id]);
+  useEffect(load, [load]);
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        <TopBar title="Order" showBack />
+        <View style={styles.errBox}>
+          <Ionicons name="alert-circle-outline" size={40} color={colors.textTertiary} />
+          <Text style={styles.errText}>{error}</Text>
+          <TouchableOpacity style={styles.retry} onPress={load} testID="order-retry"><Text style={styles.retryText}>Try again</Text></TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (loading || !order) {
     return (
@@ -39,14 +57,41 @@ export default function OrderDetail() {
     );
   }
 
-  const stepIdx = STEPS.indexOf(order.status);
-  const canConfirm = (order.status === "shipped" || order.status === "processing") && !order.delivery_confirmed;
+  const isDist = order.viewer === "distributor";
+  const stepIdx = STEPS.indexOf(order.status === "dispatched" ? "shipped" : order.status === "accepted" ? "processing" : order.status);
+  const received = order.status === "delivered" || order.delivery_confirmed;
+  const canConfirm = !isDist && (order.status === "shipped" || order.status === "processing") && !order.delivery_confirmed;
   const isConfirmed = order.delivery_confirmed;
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <TopBar title={order.code} subtitle={order.distributor_name} showBack />
+      <TopBar title={order.code} subtitle={isDist ? order.customer_name : order.distributor_name} showBack />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 30 }}>
+        {isDist && (
+          <View style={styles.custCard} testID="order-customer">
+            <Ionicons name="storefront-outline" size={18} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.custName}>{order.customer_name || "Customer"}</Text>
+              <Text style={styles.custMeta}>
+                {order.customer_phone ? `${order.customer_phone} · ` : ""}{order.payment_method === "credit" ? "On credit" : "Cash / advance"} · {(order.status || "").toUpperCase()}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Pharmacy: received order → return products / raise a query */}
+        {!isDist && received && (
+          <View style={styles.actRow}>
+            <TouchableOpacity style={styles.actBtn} onPress={() => router.push({ pathname: "/returns", params: { order_id: order.id } })} testID="order-return">
+              <Ionicons name="return-up-back-outline" size={16} color={colors.primary} />
+              <Text style={styles.actText}>Return products</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actBtn} onPress={() => router.push({ pathname: "/dispute/new", params: { distributor_id: order.distributor_id, order_id: order.id } })} testID="order-flag">
+              <Ionicons name="flag-outline" size={16} color={colors.primary} />
+              <Text style={styles.actText}>Raise query</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {/* Invoice number badge */}
         {order.invoice_number && (
           <View style={styles.invBadge}>
@@ -188,6 +233,16 @@ export default function OrderDetail() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  errBox: { alignItems: "center", marginTop: 60, gap: 10, paddingHorizontal: 24 },
+  errText: { color: colors.textSecondary, fontSize: 14, textAlign: "center" },
+  retry: { paddingHorizontal: 20, height: 44, borderRadius: 10, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
+  retryText: { color: "#FFF", fontWeight: "800" },
+  custCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginBottom: 12 },
+  custName: { fontWeight: "800", color: colors.text, fontSize: 14 },
+  custMeta: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  actRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  actBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 46, borderRadius: radius.md, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primaryBg },
+  actText: { color: colors.primary, fontWeight: "800", fontSize: 13 },
   tracker: {
     flexDirection: "row",
     justifyContent: "space-between",
